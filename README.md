@@ -60,6 +60,7 @@ The first start downloads about 30 MB of game data to `%APPDATA%\poe2-build-find
 | `check_build` | Checks a plan at a character level: skill availability, attribute and Spirit needs, passive budget |
 | `stat_priorities` | Offensive mods to look for per gear slot and on jewels, plus a defence baseline |
 | `find_uniques` | Uniques that fit the build, with current mods, level and where they drop (no prices — see below) |
+| `create_build_guide` | Writes a Maxroll-style guide page (phases, checks, quest rewards, highlighted passive tree, a Build Planner file per phase) and opens it |
 | `export_build` | Writes the build into the game's Build Planner (passives with levels, skills and supports, gear hints) |
 | `data_status` | Cached game data info |
 

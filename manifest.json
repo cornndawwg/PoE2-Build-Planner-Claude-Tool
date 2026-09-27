@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "poe2-build-planner",
   "display_name": "PoE2 Build Planner",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Turn a Path of Exile 2 play fantasy into a playable build: skills, supports, passive tree, leveling path, gear and jewel stats, and an in-game Build Planner file.",
   "long_description": "Built for casual players. Tell Claude what you want to play and it uses these tools to pick a class and ascendancy, skills and compatible supports, plan the passive tree with the level to take each point, list the gear and jewel stats to look for, suggest fitting uniques, and write the plan into the game's Build Planner. Runs locally; on first start it downloads public game data (GGG's passive tree export, RePoE and Path of Building data, about 30 MB). This product isn't affiliated with or endorsed by Grinding Gear Games in any way.",
   "author": {
@@ -58,6 +58,10 @@
     {
       "name": "export_build",
       "description": "Write the build into the in-game Build Planner"
+    },
+    {
+      "name": "create_build_guide",
+      "description": "Build guide web page with phases, tree and Build Planner files"
     },
     {
       "name": "data_status",

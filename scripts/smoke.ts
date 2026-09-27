@@ -14,7 +14,7 @@ const transport = new StdioClientTransport({
   // SMOKE_SERVER=<path to server.js> tests a compiled build (dist/ or an unpacked .mcpb).
   args: process.env.SMOKE_SERVER ? [process.env.SMOKE_SERVER] : ["--import", "tsx", "src/server.ts"],
   stderr: "inherit",
-  env: { ...(process.env as Record<string, string>), POE2BF_BUILDPLANNER_DIR: exportDir },
+  env: { ...(process.env as Record<string, string>), POE2BF_BUILDPLANNER_DIR: exportDir, POE2BF_GUIDES_DIR: exportDir, POE2BF_NO_OPEN: "1" },
 });
 const client = new Client({ name: "smoke-test", version: "0.0.1" });
 await client.connect(transport);
@@ -59,9 +59,21 @@ await call("export_build", {
   skills: [{ gemId: fireball.gemId, note: "Main skill" }],
   gear: [{ slot: "Amulet", title: "Any Amulet", priorities: ["+ Level of all Spell Skills", "Cast Speed"] }],
 });
+await call("create_build_guide", {
+  name: "Smoke Guide",
+  class: "Infernalist",
+  leagueStart: true,
+  summary: "Smoke test guide",
+  passivePlan: plan.passives.map((p: { id: string; takeAtLevel: number }) => ({ id: p.id, level: p.takeAtLevel })),
+  phases: [
+    { name: "Act 1", levels: [1, 15], skills: [{ gemId: "Fireball" }] },
+    { name: "Maps", levels: [65, 90], skills: [{ gemId: "Fireball", supports: [{ gemId: "Fiery Death" }] }] },
+  ],
+  open: false,
+});
 const files = readdirSync(exportDir);
 console.log(`exported files: ${files.join(", ")}`);
-if (files.length !== 1) process.exitCode = 1;
+if (!files.includes("Smoke Test Fireball.build") || !files.includes("Smoke Guide")) process.exitCode = 1;
 rmSync(exportDir, { recursive: true, force: true });
 
 // Errors should come back as readable tool errors, not crashes.

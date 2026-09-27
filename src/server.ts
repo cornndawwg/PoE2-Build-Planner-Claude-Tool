@@ -12,11 +12,12 @@ import { DEFENCE_STYLES, SLOT_CLASSES, statPriorities } from "./gear/priorities.
 import { findUniques } from "./gear/uniques.js";
 import { checkBuild } from "./build/checks.js";
 import { levelingPhases } from "./build/phases.js";
+import { createGuide } from "./guide/guide.js";
 import { compatibleSupports, findGem, searchSkills } from "./skills/skills.js";
 import { findScaling } from "./tree/scaling.js";
 import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, withLevels } from "./tree/tree.js";
 
-const VERSION = "0.0.3";
+const VERSION = "0.0.4";
 const log = (message: string) => process.stderr.write(`[poe2-build-planner] ${message}\n`);
 
 const INSTRUCTIONS = `Tools for planning Path of Exile 2 builds (game version 0.5) for casual players.
@@ -33,7 +34,7 @@ First ask: is this a league start (new character from level 1) or an existing ch
 
 League start: call leveling_phases and plan every phase, not just the end-game build. For each phase pick skills the character can use by then (search_skills with availableBy), supports, the passives to take during it, and gear to look for (stat_priorities with itemLevel ≈ the phase's levels). Run check_build at each phase's checkpointLevel and fix what it flags before moving on. If the final build is weak early, use a different leveling skill or setup and say when to switch. Mention useful quest rewards in each phase.
 
-Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → stat_priorities → find_uniques → export_build (ask the player first). For a league start, export one Build Planner file per phase whose setup differs (e.g. "Name - 1 Acts 1-2", "Name - 2 Acts 3-4", "Name - 3 Maps"), so the player can switch plans in game.
+Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → stat_priorities → find_uniques → export_build (ask the player first) → create_build_guide to lay it all out as a web page (ask first; it opens in their browser). For a league start, export one Build Planner file per phase whose setup differs (e.g. "Name - 1 Acts 1-2", "Name - 2 Acts 3-4", "Name - 3 Maps"), so the player can switch plans in game.
 
 This tool isn't affiliated with or endorsed by Grinding Gear Games in any way.`;
 
@@ -381,6 +382,97 @@ server.registerTool(
           gearSpirit: args.gearSpirit,
         }),
       );
+    }),
+);
+
+const guidePassive = z.object({
+  id: z.string().describe("Passive id, key or exact name"),
+  level: z.number().int().min(1).max(100).optional().describe("Level to take it (takeAtLevel)"),
+});
+
+server.registerTool(
+  "create_build_guide",
+  {
+    title: "Create a build guide page",
+    description:
+      "Write a full build guide as a local web page and open it in the player's browser (like a Maxroll or Mobalytics guide): " +
+      "overview, strengths and weaknesses, a tab per phase (skills and supports, key passives with levels, ascendancy, gear to look " +
+      "for, quest rewards, a checklist before moving on, when to switch setups), automatic checks per phase, a zoomable passive tree " +
+      "highlighting each phase, and a downloadable Build Planner file per phase. Use after planning; ask the player first. " +
+      "passivePlan is the plan_passive_tree output (id + takeAtLevel); phases split it by level. Give a phase its own passives only " +
+      "when it respecs. Gear slots use stat_priorities names (Ring, Wand, Focus…).",
+    inputSchema: {
+      name: z.string().min(1).max(80),
+      class: z.string().describe("Class or ascendancy name"),
+      ascendancy: z.string().optional(),
+      leagueStart: z.boolean(),
+      summary: z.string().describe("The play fantasy and how the build delivers it, in plain language"),
+      playstyle: z.string().optional(),
+      strengths: z.array(z.string()).optional(),
+      weaknesses: z.array(z.string()).optional(),
+      notes: z.array(z.string()).optional(),
+      passivePlan: z.array(guidePassive),
+      ascendancyPassives: z
+        .array(z.object({ id: z.string(), phase: z.number().int().min(0).optional().describe("0-based phase index it's taken in") }))
+        .optional(),
+      phases: z
+        .array(
+          z.object({
+            name: z.string(),
+            levels: z.tuple([z.number().int().min(1).max(100), z.number().int().min(1).max(100)]),
+            summary: z.string().optional(),
+            assessment: z.string().optional().describe("Plain-language viability read for this phase"),
+            skills: z.array(
+              z.object({
+                gemId: z.string().describe("gemId or exact name"),
+                note: z.string().optional(),
+                supports: z.array(z.object({ gemId: z.string(), note: z.string().optional() })).optional(),
+              }),
+            ),
+            gear: z.array(z.object({ slot: z.string(), priorities: z.array(z.string()), note: z.string().optional() })).optional(),
+            checklist: z.array(z.string()).optional(),
+            switchNote: z.string().optional(),
+            passives: z.array(guidePassive).optional().describe("Only when this phase uses a different tree (respec)"),
+            gearAttributes: z.object({ str: z.number().optional(), dex: z.number().optional(), int: z.number().optional() }).optional(),
+            gearSpirit: z.number().int().min(0).optional(),
+          }),
+        )
+        .min(1),
+      open: z.boolean().optional().describe("Open in the browser (default true)"),
+    },
+  },
+  async (args) =>
+    run(async () => {
+      const { data, tree } = await gameData();
+      const { cls, asc } = findClass(data, args.class, args.ascendancy);
+      const result = await createGuide(
+        data,
+        tree,
+        (ref) => resolveNode(tree, ref),
+        {
+          name: args.name,
+          cls,
+          ascendancyId: asc?.id,
+          ascendancyName: asc?.name,
+          leagueStart: args.leagueStart,
+          summary: args.summary,
+          playstyle: args.playstyle,
+          strengths: args.strengths,
+          weaknesses: args.weaknesses,
+          notes: args.notes,
+          passivePlan: args.passivePlan,
+          ascendancyPassives: args.ascendancyPassives,
+          phases: args.phases,
+        },
+        { open: args.open, toolVersion: VERSION },
+      );
+      return json({
+        opened: args.open !== false,
+        path: result.path,
+        buildFiles: result.buildFiles,
+        warningsByPhase: result.warningsByPhase,
+        tip: "The page is a local file; the player can bookmark it or re-run this tool to update it. Build files are also in that folder.",
+      });
     }),
 );
 
