@@ -11,15 +11,20 @@ import { buildFileName, findBuildPlannerDir, INVENTORY_IDS, toBuildFile, writeBu
 import { DEFENCE_STYLES, SLOT_CLASSES, statPriorities } from "./gear/priorities.js";
 import { findUniques } from "./gear/uniques.js";
 import { checkBuild } from "./build/checks.js";
+import { validateSkills } from "./build/validate.js";
 import { levelingPhases } from "./build/phases.js";
 import { evaluateBuild } from "./engine/evaluate.js";
 import { findEngine, PobEngine } from "./engine/pob.js";
 import { createGuide } from "./guide/guide.js";
+import type { Skill } from "./data/types.js";
+import { availableFromLevel } from "./skills/levels.js";
 import { compatibleSupports, findGem, searchSkills } from "./skills/skills.js";
+import { stripMarkup } from "./text.js";
+import { completePassives } from "./tree/complete.js";
 import { findScaling } from "./tree/scaling.js";
 import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, withLevels } from "./tree/tree.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 const log = (message: string) => process.stderr.write(`[poe2-build-planner] ${message}\n`);
 
 const INSTRUCTIONS = `Tools for planning Path of Exile 2 builds (game version 0.5) for casual players.
@@ -146,11 +151,15 @@ server.registerTool(
   {
     title: "Search skills",
     description:
-      "Find active and spirit skills by gem tags, skill types or name words. `require` terms must all match; `prefer` terms rank results. " +
-      "Useful terms: fire, cold, lightning, chaos, physical, spell, attack, projectile, area, melee, minion, bow, crossbow, mace, spear, quarterstaff, totem, curse, aura, herald, channelling, duration. " +
-      "Results include weapon requirements and where the skill comes from (uncut-gem or item).",
+      "Find active and spirit skill gems by gem tags, skill types, name words or description text. `require` terms must all match " +
+      "tags/types/name; `text` words must all appear in the skill's description (e.g. [\"poison\"], [\"slam\"]); `prefer` terms rank results. " +
+      "Useful terms: fire, cold, lightning, chaos, physical, spell, attack, projectile, area, melee, slam, strike, minion, bow, crossbow, " +
+      "mace, spear, quarterstaff, totem, curse, aura, herald, channelling, duration, persistent, buff. Each result has the gemId, tags, " +
+      "skill types, description, weapon requirements, earliest level and where it comes from (uncut-gem or item). Use gem_details for " +
+      "one gem's full details and compatible_supports for its supports.",
     inputSchema: {
-      require: z.array(z.string()).optional().describe("All must match, e.g. [\"fire\", \"spell\"]"),
+      require: z.array(z.string()).optional().describe("All must match tags/types/name, e.g. [\"fire\", \"spell\"]"),
+      text: z.array(z.string()).optional().describe("Words that must all appear in the description, e.g. [\"poison\"]"),
       prefer: z.array(z.string()).optional().describe("Raise ranking, e.g. [\"projectile\", \"area\"]"),
       weapon: z.string().optional().describe("Only skills usable with this weapon, e.g. \"bow\", \"mace\""),
       includeItemSkills: z.boolean().optional().describe("Also include skills granted by items (weapon bases, uniques)"),
@@ -175,7 +184,7 @@ server.registerTool(
       "Support gems that can support a skill, ranked: the game's own recommendations first, then tag matches. " +
       "Each result explains why. Lineage supports are rare drops (expensive for a budget build).",
     inputSchema: {
-      gemId: z.string().describe("gemId from search_skills, or the skill's exact name"),
+      gemId: z.string().describe("The skill's exact name (e.g. \"Fireball\") or its gemId from the search_skills tool"),
       prefer: z.array(z.string()).optional().describe("Extra tags to favour, e.g. [\"ignite\"]"),
       includeLineage: z.boolean().optional().describe("Include lineage supports (default true)"),
       limit: z.number().int().min(1).max(100).optional(),
@@ -191,26 +200,89 @@ server.registerTool(
 );
 
 server.registerTool(
+  "gem_details",
+  {
+    title: "Gem details",
+    description:
+      "Everything about one skill, spirit or support gem: tags, skill types (what supports and passives key off), description, " +
+      "what it does at gem levels 1 and 20, Spirit cost, attribute weighting, weapon requirements, earliest character level, " +
+      "support family, and the supports the game recommends for it. Pass the exact name or gemId.",
+    inputSchema: { gem: z.string().describe("Exact gem name, e.g. \"Herald of Ash\", or gemId") },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ gem: ref }) =>
+    run(async () => {
+      const { data } = await gameData();
+      const gem = findGem(data, ref);
+      const skill = data.skills[gem.grantedEffectId] as
+        | (Skill & { stat_sets?: { per_level?: Record<string, { stat_text?: Record<string, string> }> }[] })
+        | undefined;
+      const statText = (level: string) =>
+        Object.values(skill?.stat_sets?.[0]?.per_level?.[level]?.stat_text ?? {}).map(stripMarkup);
+      const recommended = (gem.gem.recommended_supports ?? []).flatMap((id) => {
+        try {
+          return [findGem(data, id).name];
+        } catch {
+          return [];
+        }
+      });
+      return json({
+        name: gem.name,
+        gemId: gem.gameId,
+        kind: gem.kind,
+        source: gem.source,
+        availableFromLevel: availableFromLevel(gem),
+        tags: gem.tags,
+        skillTypes: skill?.active_skill?.types ?? [],
+        description: stripMarkup(skill?.active_skill?.description ?? ""),
+        supportText: gem.kind === "support" ? stripMarkup(gem.gem.support_text ?? "") : undefined,
+        atLevel1: statText("1"),
+        atLevel20: statText("20"),
+        spiritCost: skill?.static?.reservations?.spirit,
+        attributeWeights: gem.gem.requirement_weights,
+        weaponRequirements: gem.weaponRequirements,
+        supportFamily: gem.family,
+        recommendedSupports: recommended,
+      });
+    }),
+);
+
+server.registerTool(
   "find_passives",
   {
     title: "Find scaling passives",
     description:
       "Notables, keystones and ascendancy notables whose text matches what the build scales. Give the class (and ascendancy) " +
       "to get distances from the class start and that ascendancy's nodes. Terms are words from passive text, e.g. " +
-      "fire, spell, cast speed, critical, ignite, minion, projectile, area of effect, energy shield, life.",
+      "fire, spell, cast speed, critical, ignite, minion, projectile, area of effect, energy shield, life. " +
+      "Set listAscendancy to get every node of the ascendancy (no terms needed), to see all 8-point options.",
     inputSchema: {
-      terms: z.array(z.string()).min(1),
+      terms: z.array(z.string()).optional().describe("Required unless listAscendancy is set"),
       class: z.string().optional().describe("Class or ascendancy name"),
       ascendancy: z.string().optional(),
+      listAscendancy: z.boolean().optional().describe("List every node of the ascendancy, with stats"),
       includeJewelSockets: z.boolean().optional(),
       limit: z.number().int().min(1).max(100).optional(),
     },
     annotations: { readOnlyHint: true },
   },
-  async ({ terms, class: className, ascendancy, includeJewelSockets, limit }) =>
+  async ({ terms = [], class: className, ascendancy, listAscendancy, includeJewelSockets, limit }) =>
     run(async () => {
     const { data, tree } = await gameData();
     const found = className ? findClass(data, className, ascendancy) : undefined;
+    if (listAscendancy) {
+      if (!found?.asc) throw new Error("listAscendancy needs the ascendancy (e.g. class \"Titan\").");
+      const nodes = [...tree.nodes].filter(([, n]) => n.ascendancyId === found.asc!.id && !n.isAscendancyStart);
+      return json({
+        ascendancy: found.asc.name,
+        points: ASCENDANCY_POINTS,
+        nodes: nodes.map(([key]) => {
+          const d = tree.describe(key);
+          return { key, id: d.id, name: d.name, kind: d.kind, stats: d.stats, connectsTo: tree.neighbors(key).filter((k) => tree.nodes.get(k)?.ascendancyId === found.asc!.id).map((k) => tree.describe(k).name) };
+        }),
+      });
+    }
+    if (terms.length === 0) throw new Error("Give some terms, or set listAscendancy.");
     const kinds = ["keystone", "notable", "ascendancy-notable"] as const;
     const results = findScaling(tree, {
       terms,
@@ -286,9 +358,12 @@ server.registerTool(
       "monsters and against a boss, seconds to kill a normal/rare monster and a boss, hits you survive from monsters and bosses, " +
       "life, energy shield, resistances (with the campaign's resistance penalty and only the quest rewards earned by that level), " +
       "Spirit and attributes, plus a verdict band (Comfortable / Workable / Borderline / Not yet) with the weak point and what to fix " +
-      "first. Level 65+ is judged for early maps, T15 and juiced T16. By default it assumes budget rare gear for that level (a few " +
-      "mid-roll mods per slot, based on `terms` and `defence`); pass `gear: \"none\"` for no gear. Use it at each phase's checkpoint. " +
-      "Numbers are estimates: assumed gear and heuristic bands, not guarantees. Windows only for now.",
+      "first. Level 65+ is judged for early maps, T15 and juiced T16. Damage is broken down into hits, ignite, poison, bleed and " +
+      "minions. By default it assumes budget rare gear for that level (a few mid-roll mods per slot, based on `terms` and `defence`); " +
+      "pass `items` to use specific uniques (by name) or pasted item text in their slots, or `gear: \"none\"` for no gear. " +
+      "Missing connecting passives are filled in (and listed), and \"+5 to any Attribute\" passives are spent where the gems and " +
+      "weapon need them. Use it at each phase's checkpoint. Numbers are estimates: assumed gear and heuristic bands, not " +
+      "guarantees. Windows only for now.",
     inputSchema: {
       class: z.string().describe("Class or ascendancy name"),
       ascendancy: z.string().optional(),
@@ -301,6 +376,16 @@ server.registerTool(
       avoid: z.array(z.string()).optional(),
       defence: z.array(z.enum(DEFENCE_STYLES)).optional().describe("Defence layers for the assumed gear (default: life)"),
       weapons: z.array(z.string()).optional().describe("Weapon item classes to assume, e.g. [\"Staff\"] or [\"Wand\", \"Focus\"]"),
+      items: z
+        .array(
+          z.object({
+            unique: z.string().optional().describe("Exact unique name, e.g. \"Plaguefinger\""),
+            raw: z.string().optional().describe("Item text copied from the game (Ctrl+C)"),
+            slot: z.string().optional().describe("Weapon 1, Weapon 2, Helmet, Body Armour, Gloves, Boots, Amulet, Ring 1, Ring 2 or Belt (usually worked out automatically)"),
+          }),
+        )
+        .optional()
+        .describe("Specific items; each replaces the assumed item in its slot"),
       gear: z.enum(["budget", "none"]).optional(),
     },
     annotations: { readOnlyHint: true },
@@ -322,19 +407,25 @@ server.registerTool(
       const { cls, asc } = findClass(data, args.class, args.ascendancy);
       const skills = args.skills.map((s) => ({ gem: findGem(data, s.gemId), supports: s.supports?.map((id) => findGem(data, id)) }));
       const terms = args.terms?.length ? args.terms : skills[args.mainSkill ?? 0]!.gem.tags.filter((t) => !["intelligence", "strength", "dexterity", "repeatable"].includes(t));
+      const passiveKeys = [...args.passives, ...(args.ascendancyPassives ?? [])].map((p) => resolveNode(tree, p));
+      const allocated = passiveKeys.flatMap((k) => tree.nodes.get(k) ?? []);
+      const skillIssues = validateSkills(data, skills, allocated);
       const evaluation = await evaluateBuild(engine, data, {
         cls,
         ascendancyName: asc?.name,
+        ascendancyId: asc?.id,
         level: args.level,
-        passives: [...args.passives, ...(args.ascendancyPassives ?? [])].map((p) => resolveNode(tree, p)),
+        passives: passiveKeys,
         skills,
         mainSkill: args.mainSkill,
+        items: args.items,
+        tree,
         gear:
           args.gear === "none"
             ? { kind: "none" }
             : { kind: "budget", terms, avoid: args.avoid, defence: args.defence?.length ? args.defence : ["life"], weapons: args.weapons },
       });
-      return json({ available: true, ...evaluation });
+      return json({ available: true, skillIssues, ...evaluation });
     }),
 );
 
@@ -412,7 +503,14 @@ server.registerTool(
   async () =>
     run(async () => {
       const { data } = await gameData();
-      return json(levelingPhases(data));
+      return json({
+        phases: levelingPhases(data),
+        notes: [
+          "passivePoints already includes the quest rewards' \"+2 Weapon Set Passive Skill Points\" (24 in total), counted the way Path of Building counts them — spend them like normal points in the plan.",
+          "Ascendancy points come from the Trials in the campaign (8 in total, 2 per trial). When each trial is done isn't in the game data; ask the player or give a rough estimate and say it's an estimate.",
+          "Level ranges are approximate: they come from the area levels of the campaign's reward quests.",
+        ],
+      });
     }),
 );
 
@@ -423,8 +521,10 @@ server.registerTool(
     description:
       "Rule-based checks for a planned build at a given character level: which skills are usable yet (and from what level), " +
       "gem attribute requirements vs Strength/Dexterity/Intelligence from the class, passives and gear (and how to spend " +
-      "\"+5 to any Attribute\" passives), Spirit for persistent skills vs Spirit from quests, passives and gear, and the passive " +
-      "point budget. Run it for each leveling phase (e.g. levels 12, 28, 45, 65, 90). No damage numbers yet.",
+      "\"+5 to any Attribute\" passives), weapon attribute requirements (give `weapons`; Giant's Blood tripling is applied), " +
+      "Spirit for persistent skills vs Spirit from quests, passives and gear, the passive point budget, and skill/support rules " +
+      "(the same rules export_build enforces). Missing connecting passives are filled in and counted. Run it for each leveling " +
+      "phase (e.g. levels 12, 28, 45, 65, 90). For damage and survival numbers use evaluate_build.",
     inputSchema: {
       class: z.string().describe("Class or ascendancy name"),
       ascendancy: z.string().optional(),
@@ -437,24 +537,32 @@ server.registerTool(
         .optional()
         .describe("Attributes expected from gear, if known"),
       gearSpirit: z.number().int().min(0).optional().describe("Spirit from gear, if known (e.g. a sceptre)"),
+      weapons: z
+        .array(z.string())
+        .optional()
+        .describe("Weapons for their attribute requirements: item classes (\"Two Hand Mace\", \"Shield\") or exact base names"),
     },
     annotations: { readOnlyHint: true },
   },
   async (args) =>
     run(async () => {
       const { data, tree } = await gameData();
-      const { cls } = findClass(data, args.class, args.ascendancy);
-      return json(
-        checkBuild(data, data.nodes, {
-          cls,
-          characterLevel: args.characterLevel,
-          passives: args.passives.map((p) => resolveNode(tree, p)),
-          ascendancyPassives: args.ascendancyPassives?.map((p) => resolveNode(tree, p)),
-          skills: args.skills.map((s) => ({ gem: findGem(data, s.gemId), supports: s.supports?.map((id) => findGem(data, id)) })),
-          gearAttributes: args.gearAttributes,
-          gearSpirit: args.gearSpirit,
-        }),
-      );
+      const { cls, asc } = findClass(data, args.class, args.ascendancy);
+      const given = [...args.passives, ...(args.ascendancyPassives ?? [])].map((p) => resolveNode(tree, p));
+      const completed = completePassives(tree, cls.startNode, given, asc?.id);
+      const result = checkBuild(data, data.nodes, {
+        cls,
+        characterLevel: args.characterLevel,
+        passives: completed.main,
+        ascendancyPassives: completed.ascendancy,
+        skills: args.skills.map((s) => ({ gem: findGem(data, s.gemId), supports: s.supports?.map((id) => findGem(data, id)) })),
+        gearAttributes: args.gearAttributes,
+        gearSpirit: args.gearSpirit,
+        weapons: args.weapons,
+      });
+      if (completed.added.length) result.warnings.unshift(`Added ${completed.added.length} connecting passives the list was missing; they're counted in the budget.`);
+      if (completed.unreachable.length) result.warnings.unshift(`Can't reach: ${completed.unreachable.join(", ")}.`);
+      return json({ ...result, passivesAddedToConnect: completed.added });
     }),
 );
 
@@ -513,6 +621,10 @@ server.registerTool(
             passives: z.array(guidePassive).optional().describe("Only when this phase uses a different tree (respec)"),
             gearAttributes: z.object({ str: z.number().optional(), dex: z.number().optional(), int: z.number().optional() }).optional(),
             gearSpirit: z.number().int().min(0).optional(),
+            items: z
+              .array(z.object({ unique: z.string().optional(), raw: z.string().optional(), slot: z.string().optional() }))
+              .optional()
+              .describe("Specific uniques (by name) or item text used for this phase's numbers"),
           }),
         )
         .min(1),
@@ -549,11 +661,14 @@ server.registerTool(
         { open: args.open, toolVersion: VERSION, engine: getEngine() },
       );
       return json({
-        opened: args.open !== false,
+        opened: result.opened,
         path: result.path,
+        folder: result.dir,
         buildFiles: result.buildFiles,
         warningsByPhase: result.warningsByPhase,
-        tip: "The page is a local file; the player can bookmark it or re-run this tool to update it. Build files are also in that folder.",
+        tip: result.opened
+          ? "Opened in the browser. The page is a local file; bookmark it or re-run this tool to update it."
+          : "Not opened automatically: tell the player to open the path above (Documents › PoE2 Build Planner › guides) in a browser.",
       });
     }),
 );

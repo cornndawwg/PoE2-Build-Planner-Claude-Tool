@@ -40,6 +40,8 @@ export interface SkillSearchQuery {
   require?: string[];
   /** Nice-to-have terms that raise the ranking (e.g. ["projectile", "area"]). */
   prefer?: string[];
+  /** Words that must all appear in the skill's description (e.g. ["poison"]). */
+  text?: string[];
   /** Only skills usable with this weapon (e.g. "bow", "mace"). Skills with no weapon requirement always pass. */
   weapon?: string;
   kinds?: PlayerGem["kind"][];
@@ -114,6 +116,8 @@ export function searchSkills(data: GameData, query: SkillSearchQuery): SkillMatc
     const skill = skillOf(data, gem);
     const terms = searchTerms(gem, skill);
     if (!require.every((t) => terms.has(t))) continue;
+    const description = stripMarkup(skill?.active_skill?.description ?? "").toLowerCase();
+    if (!(query.text ?? []).every((word) => description.includes(word.toLowerCase()))) continue;
     const preferred = (query.prefer ?? []).filter((t) => terms.has(norm(t)));
     matches.push({
       gameId: gem.gameId,

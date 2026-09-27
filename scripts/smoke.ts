@@ -36,7 +36,9 @@ await call("data_status");
 await call("list_classes");
 const skills = JSON.parse(await call("search_skills", { require: ["fire", "spell"], prefer: ["projectile"], limit: 5 }));
 const fireball = skills.find((s: { name: string }) => s.name === "Fireball");
-await call("compatible_supports", { gemId: fireball.gemId, limit: 6 });
+await call("compatible_supports", { gemId: "Fireball", limit: 6 });
+await call("gem_details", { gem: "Herald of Ash" });
+await call("find_passives", { class: "Titan", listAscendancy: true });
 const passives = JSON.parse(await call("find_passives", { terms: ["fire", "spell"], class: "Infernalist", limit: 8 }));
 const main = passives.filter((p: { kind: string }) => p.kind === "notable").slice(0, 4).map((p: { key: string }) => p.key);
 const asc = passives.filter((p: { kind: string }) => p.kind === "ascendancy-notable").slice(0, 2).map((p: { id: string }) => p.id);
@@ -44,6 +46,13 @@ const plan = JSON.parse(await call("plan_passive_tree", { class: "Witch", ascend
 await call("stat_priorities", { terms: ["fire", "spell", "cast speed"], avoid: ["attack"], slots: ["Amulet", "Helmet", "Jewel"], perSlot: 3, defence: ["energy shield"], itemLevel: 30 });
 
 await call("leveling_phases");
+await call("check_build", {
+  class: "Titan",
+  characterLevel: 60,
+  passives: ["Giant's Blood"],
+  skills: [{ gemId: "Sunder", supports: ["Corrosion"] }],
+  weapons: ["Two Hand Mace"],
+});
 await call("check_build", {
   class: "Infernalist",
   characterLevel: 28,

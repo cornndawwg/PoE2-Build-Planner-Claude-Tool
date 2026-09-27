@@ -55,13 +55,14 @@ describe.skipIf(!hasCache)(".build export against real data", () => {
     expect(() => toBuildFile(data, { ...plan, slots: [{ slot: "Hat" }] })).toThrow(/Unknown slot/);
   });
 
-  it("warns about supports that can't support the skill", () => {
+  it("refuses supports that can't support the skill, before writing anything", () => {
     const fireball = skillOf(data, data.playerGems.get(plan.skills[0]!.gemId)!)!;
     const incompatible = [...data.playerGems.values()].find(
       (g) => g.kind === "support" && g.source === "uncut-gem" && !canSupport(skillOf(data, g)!, fireball).ok,
     )!;
-    const { warnings } = toBuildFile(data, { ...plan, skills: [{ ...plan.skills[0]!, supports: [{ gemId: incompatible.gameId }] }] });
-    expect(warnings.join()).toMatch(/can't support/);
+    expect(() => toBuildFile(data, { ...plan, skills: [{ ...plan.skills[0]!, supports: [{ gemId: incompatible.gameId }] }] })).toThrow(
+      /can't support/,
+    );
   });
 
   describe("writing", () => {
@@ -91,15 +92,16 @@ describe.skipIf(!hasCache)(".build export against real data", () => {
 });
 
 describe.skipIf(!hasCache)("support family warning", () => {
-  it("warns when two supports from one family are on a skill", async () => {
+  it("refuses two supports from one family on a skill", async () => {
     const data = await loadGameData();
     const byName = (n: string) => [...data.playerGems.values()].find((g) => g.name === n)!.gameId;
-    const { warnings } = toBuildFile(data, {
-      name: "x",
-      passives: [],
-      skills: [{ gemId: byName("Fireball"), supports: [{ gemId: byName("Ignite I") }, { gemId: byName("Ignite II") }] }],
-    });
-    expect(warnings.join()).toMatch(/same support family/);
+    expect(() =>
+      toBuildFile(data, {
+        name: "x",
+        passives: [],
+        skills: [{ gemId: byName("Fireball"), supports: [{ gemId: byName("Ignite I") }, { gemId: byName("Ignite II") }] }],
+      }),
+    ).toThrow(/same support family/);
   });
 });
 

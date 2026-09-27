@@ -4,25 +4,39 @@
 import type { GameData, PlayableClass, PlayerGem } from "../data/gamedata.js";
 import type { DefenceStyle } from "../gear/priorities.js";
 import { gemLevelForCharacter } from "../skills/levels.js";
+import { completePassives } from "../tree/complete.js";
+import type { PassiveTree } from "../tree/tree.js";
 import { assumeGear, type AssumedItem } from "./gear.js";
 import type { PobEngine } from "./pob.js";
 import { verdict, type Verdict } from "./verdict.js";
 
+/** A specific item: a unique by name, or pasted item text. Replaces the assumed item in its slot. */
+export interface ItemChoice {
+  unique?: string;
+  raw?: string;
+  /** Path of Building slot ("Weapon 1", "Weapon 2", "Helmet", "Body Armour", "Gloves", "Boots", "Amulet", "Ring 1", "Ring 2", "Belt"). */
+  slot?: string;
+}
+
 export interface EvaluateInput {
   cls: PlayableClass;
   ascendancyName?: string;
+  ascendancyId?: string;
   level: number;
-  /** Main-tree and ascendancy passives (tree keys). */
+  /** Main-tree and ascendancy passives (tree keys). Missing connecting passives are added. */
   passives: string[];
   skills: { gem: PlayerGem; supports?: PlayerGem[] }[];
   /** 0-based index of the main damage skill in `skills`. */
   mainSkill?: number;
   gear:
     | { kind: "none" }
-    | { kind: "budget"; terms: string[]; avoid?: string[]; defence: DefenceStyle[]; weapons?: string[] }
-    | { kind: "items"; items: { raw: string; slot?: string }[] };
+    | { kind: "budget"; terms: string[]; avoid?: string[]; defence: DefenceStyle[]; weapons?: string[] };
+  /** Specific items (uniques or pasted text); they replace the assumed item in their slot. */
+  items?: ItemChoice[];
   /** Gem quality to assume (default: 0 in the campaign, 20 at level 65+). */
   quality?: number;
+  /** Needed to fill in missing connecting passives and spend "+5 to any Attribute" nodes. */
+  tree?: PassiveTree;
 }
 
 interface PobResult {
@@ -53,7 +67,10 @@ const round = (n: number | undefined) => (n === undefined ? undefined : Math.rou
 
 export interface Scenario {
   enemy: "normal monsters" | "a boss" | "a pinnacle boss";
+  /** Total damage per second, hits plus damage over time (or minions, if they deal more). */
   dps: number;
+  /** Where the damage comes from. */
+  breakdown: { hits?: number; ignite?: number; poison?: number; bleed?: number; otherDamageOverTime?: number; minions?: number };
   averageHit?: number;
   /** Seconds to kill, using PoB's normal-monster life for the area level and rough rarity multipliers. */
   secondsToKill: { normal?: number; rare?: number; boss?: number };
@@ -86,13 +103,54 @@ export interface Evaluation {
   /** Campaign levels get one verdict; level 65+ gets early maps, T15 and juiced T16. */
   verdicts: Verdict[];
   resources: { mana?: number; manaUnreserved?: number; spirit?: number; spiritUnreserved?: number };
-  attributes: { str?: number; dex?: number; int?: number; required: { str?: number; dex?: number; int?: number } };
+  attributes: {
+    str?: number;
+    dex?: number;
+    int?: number;
+    /** From Path of Building: gems, weapon and armour, after Giant's Blood and similar. */
+    required: { str?: number; dex?: number; int?: number };
+    /** How the "+5 to any Attribute" passives were spent. */
+    flexibleNodes: { str: number; dex: number; int: number };
+  };
+  passives: { allocated: number; addedToConnect: string[]; unreachable: string[] };
   assumedGear: { slot: string; base: string; mods: string[] }[];
+  itemsUsed: string[];
   notes: string[];
 }
 
 /** Rough life multipliers by monster rarity (not in the game data; a labelled heuristic). */
 export const RARITY_LIFE = { normal: 1, rare: 5, boss: 25 } as const;
+
+const CLASS_TO_SLOT: Record<string, string[]> = {
+  Helmet: ["Helmet"],
+  "Body Armour": ["Body Armour"],
+  Gloves: ["Gloves"],
+  Boots: ["Boots"],
+  Amulet: ["Amulet"],
+  Ring: ["Ring 1", "Ring 2"],
+  Belt: ["Belt"],
+  Focus: ["Weapon 2"],
+  Shield: ["Weapon 2"],
+  Buckler: ["Weapon 2"],
+  Quiver: ["Weapon 2"],
+};
+
+/** The Path of Building slot a chosen item goes in. */
+function slotFor(data: GameData, item: ItemChoice, taken: Set<string>): string | undefined {
+  if (item.slot) return item.slot;
+  let itemClass: string | undefined;
+  if (item.unique) itemClass = data.uniques.find((u) => u.name.toLowerCase() === item.unique!.toLowerCase())?.itemClass;
+  if (!itemClass && item.raw) {
+    const lines = item.raw.split(/\r?\n/).map((l) => l.trim());
+    const classLine = lines.find((l) => l.startsWith("Item Class:"));
+    if (classLine) itemClass = classLine.replace("Item Class:", "").trim().replace(/s$/, "");
+    const byBase = new Map(Object.values(data.baseItems).map((b) => [b.name, b.item_class]));
+    itemClass ??= lines.map((l) => byBase.get(l)).find(Boolean);
+  }
+  if (!itemClass) return undefined;
+  const options = CLASS_TO_SLOT[itemClass] ?? (itemClass === "Jewel" ? [] : ["Weapon 1"]);
+  return options.find((s) => !taken.has(s)) ?? options[0];
+}
 
 export async function evaluateBuild(engine: PobEngine, data: GameData, input: EvaluateInput): Promise<Evaluation> {
   const level = input.level;
@@ -102,40 +160,113 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
   const mainIndex = input.mainSkill ?? 0;
   const main = input.skills[mainIndex]?.gem;
   if (!main) throw new Error("The build needs at least one skill to calculate.");
+  const notes: string[] = [];
 
-  let items: { raw: string; slot?: string }[] = [];
+  // A connected tree: add missing connecting passives rather than evaluating floating nodes.
+  let passives = input.passives;
+  let addedToConnect: string[] = [];
+  let unreachable: string[] = [];
+  if (input.tree) {
+    const completed = completePassives(input.tree, input.cls.startNode, input.passives, input.ascendancyId);
+    passives = [...completed.main, ...completed.ascendancy];
+    addedToConnect = completed.added;
+    unreachable = completed.unreachable;
+    if (addedToConnect.length) notes.push(`Added ${addedToConnect.length} connecting passives so the tree is reachable.`);
+    if (unreachable.length) notes.push(`Left out passives this character can't reach: ${unreachable.join(", ")}.`);
+  }
+
+  // Gear: assumed budget rares, with chosen items replacing their slots.
   let assumed: AssumedItem[] = [];
   if (input.gear.kind === "budget") {
     assumed = assumeGear(data, { level, terms: input.gear.terms, avoid: input.gear.avoid, defence: input.gear.defence, mainSkill: main, weapons: input.gear.weapons });
-    items = assumed.map((a) => ({ raw: a.raw, slot: a.slot }));
-  } else if (input.gear.kind === "items") {
-    items = input.gear.items;
   }
+  const chosen: { raw?: string; unique?: string; slot?: string }[] = [];
+  const takenSlots = new Set<string>();
+  const itemsUsed: string[] = [];
+  for (const item of input.items ?? []) {
+    const slot = slotFor(data, item, takenSlots);
+    if (!slot) {
+      notes.push(`Couldn't tell which slot ${item.unique ?? "an item"} goes in${item.unique ? "" : "; give its slot"}. Jewels aren't supported yet.`);
+      continue;
+    }
+    takenSlots.add(slot);
+    chosen.push({ ...item, slot });
+    itemsUsed.push(`${item.unique ?? item.raw?.split(/\r?\n/)[1] ?? "item"} (${slot})`);
+  }
+  const remainingAssumed = assumed.filter((a) => !takenSlots.has(a.slot));
+  const items = [...remainingAssumed.map((a) => ({ raw: a.raw, slot: a.slot })), ...chosen];
 
   const skillTexts = input.skills.map(({ gem, supports }) =>
     [`${gem.name} ${gemLevel}/${quality}  1`, ...(supports ?? []).map((s) => `${s.name} 1/0  1`)].join("\n") + "\n",
   );
-  const params = (enemyIsBoss: string) => ({
+  const params = (enemyIsBoss: string, attributes: Record<string, number>) => ({
     className: input.ascendancyName ?? input.cls.name,
     level,
-    passives: input.passives,
+    passives,
+    attributes,
     skills: skillTexts,
     mainSkill: mainIndex + 1,
     items,
     config: { enemyIsBoss, enemyLevel: areaLevel, resistancePenalty: resistancePenalty(level), questsUpToLevel: level },
   });
 
+  // Spend "+5 to any Attribute" passives where Path of Building says attributes are short
+  // (its requirement includes gems, weapon and armour, and Giant's Blood-style multipliers).
+  const flexibleKeys = input.tree ? passives.filter((k) => input.tree!.nodes.get(k)?.isGenericAttribute) : [];
+  const flexible = { str: 0, dex: 0, int: 0 };
+  let attributes: Record<string, number> = {};
+  let clearRun = await engine.request<PobResult>("evaluate", params("None", attributes));
+  if (flexibleKeys.length) {
+    const s0 = clearRun.stats;
+    const missing = {
+      str: Math.max(0, (s0.ReqStr ?? 0) - (s0.Str ?? 0)),
+      dex: Math.max(0, (s0.ReqDex ?? 0) - (s0.Dex ?? 0)),
+      int: Math.max(0, (s0.ReqInt ?? 0) - (s0.Int ?? 0)),
+    };
+    const index = { str: 1, dex: 2, int: 3 } as const;
+    const order = (["str", "dex", "int"] as const).slice().sort((a, b) => missing[b] - missing[a]);
+    const queue = [...flexibleKeys];
+    for (const a of order) {
+      while (missing[a] > 0 && queue.length) {
+        attributes[queue.shift()!] = index[a];
+        flexible[a]++;
+        missing[a] -= 5;
+      }
+    }
+    // Anything left over goes to the main skill's attribute.
+    const weights = main.gem.requirement_weights;
+    const mainAttr = weights && weights.strength >= weights.dexterity && weights.strength >= weights.intelligence ? "str" : weights && weights.dexterity >= weights.intelligence ? "dex" : "int";
+    for (const key of queue) {
+      attributes[key] = index[mainAttr];
+      flexible[mainAttr]++;
+    }
+    attributes = { ...attributes };
+    clearRun = await engine.request<PobResult>("evaluate", params("None", attributes));
+  }
   const bossTier = level >= 65 ? "Pinnacle" : "Boss";
-  const clearRun = await engine.request<PobResult>("evaluate", params("None"));
-  const bossRun = await engine.request<PobResult>("evaluate", params(bossTier));
+  const bossRun = await engine.request<PobResult>("evaluate", params(bossTier, attributes));
 
   const scenario = (run: PobResult, enemy: Scenario["enemy"]): Scenario => {
     const s = run.stats;
-    const dps = s.MinionCombinedDPS && s.MinionCombinedDPS > (s.CombinedDPS ?? 0) ? s.MinionCombinedDPS : (s.CombinedDPS ?? s.TotalDPS ?? 0);
+    const own = s.CombinedDPS ?? s.TotalDPS ?? 0;
+    const minions = s.MinionCombinedDPS;
+    const dps = minions && minions > own ? minions : own;
+    const ignite = s.IgniteDPS || undefined;
+    const poison = s.PoisonDPS || undefined;
+    const bleed = s.BleedDPS || undefined;
+    const otherDot = s.TotalDot || undefined;
     const kill = (mult: number) => (dps > 0 ? Math.round(((run.enemyBaseLife * mult) / dps) * 10) / 10 : undefined);
     return {
       enemy,
       dps: Math.round(dps),
+      breakdown: {
+        hits: round(s.TotalDPS),
+        ignite: round(ignite),
+        poison: round(poison),
+        bleed: round(bleed),
+        otherDamageOverTime: round(otherDot),
+        minions: round(minions),
+      },
       averageHit: round(s.AverageHit),
       secondsToKill:
         enemy === "normal monsters"
@@ -145,11 +276,19 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
   };
 
   const s = clearRun.stats;
-  const notes = [...new Set([...clearRun.notes, ...bossRun.notes])];
+  notes.push(...new Set([...clearRun.notes, ...bossRun.notes]));
   const missingGem = clearRun.skills.flatMap((g) => g.gems).find((g) => !g.found);
   if (missingGem) notes.push(`Path of Building didn't recognise ${missingGem.name}; its numbers are missing.`);
-  if (input.gear.kind === "none") notes.push("Calculated with no gear at all, so numbers are far below a real character's.");
-  if (input.gear.kind === "budget") notes.push("Calculated with assumed budget rares (a few mid-roll mods per slot), not real items.");
+  if (input.gear.kind === "none" && !chosen.length) notes.push("Calculated with no gear at all, so numbers are far below a real character's.");
+  if (remainingAssumed.length) notes.push("Slots without a chosen item use assumed budget rares (a few mid-roll mods per slot), not real items.");
+  for (const a of ["Str", "Dex", "Int"] as const) {
+    const req = s[`Req${a}`] ?? 0;
+    const have = s[a] ?? 0;
+    if (req > have) {
+      const name = { Str: "Strength", Dex: "Dexterity", Int: "Intelligence" }[a];
+      notes.push(`Still short ${Math.round(req - have)} ${name} (need ${Math.round(req)}, have ${Math.round(have)}): gear or more ${name} passives needed, or some gems and items can't be used.`);
+    }
+  }
 
   const clear = scenario(clearRun, "normal monsters");
   const boss = scenario(bossRun, bossTier === "Pinnacle" ? "a pinnacle boss" : "a boss");
@@ -187,8 +326,10 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
     survival: { hitsFromNormal, hitsFromBoss, maxHit: round(s.SecondMinimalMaximumHitTaken) },
     verdicts,
     resources: { mana: round(s.Mana), manaUnreserved: round(s.ManaUnreserved), spirit: round(s.Spirit), spiritUnreserved: round(s.SpiritUnreserved) },
-    attributes: { str: s.Str, dex: s.Dex, int: s.Int, required: { str: s.ReqStr, dex: s.ReqDex, int: s.ReqInt } },
-    assumedGear: assumed.map(({ slot, base, mods }) => ({ slot, base, mods })),
+    attributes: { str: s.Str, dex: s.Dex, int: s.Int, required: { str: s.ReqStr, dex: s.ReqDex, int: s.ReqInt }, flexibleNodes: flexible },
+    passives: { allocated: clearRun.allocatedPassives, addedToConnect, unreachable },
+    assumedGear: remainingAssumed.map(({ slot, base, mods }) => ({ slot, base, mods })),
+    itemsUsed,
     notes,
   };
 }

@@ -2,6 +2,7 @@
 // each phase, adds quest rewards, writes a Build Planner file per phase, and renders the page.
 
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +13,7 @@ import { availableFromLevel } from "../skills/levels.js";
 import { findGem } from "../skills/skills.js";
 import { stripMarkup } from "../text.js";
 import { nodeKind, type PassiveTree } from "../tree/tree.js";
-import { evaluateBuild } from "../engine/evaluate.js";
+import { evaluateBuild, type ItemChoice } from "../engine/evaluate.js";
 import type { PobEngine } from "../engine/pob.js";
 import type { DefenceStyle } from "../gear/priorities.js";
 import { renderGuide, type GuideModel, type GuidePhase } from "./render.js";
@@ -37,6 +38,8 @@ export interface GuidePhaseInput {
   passives?: GuidePassiveInput[];
   gearAttributes?: { str?: number; dex?: number; int?: number };
   gearSpirit?: number;
+  /** Specific items for this phase's numbers (uniques by name or pasted text). */
+  items?: ItemChoice[];
 }
 
 export interface GuideInput {
@@ -90,26 +93,46 @@ const SLOT_TO_INVENTORY: Record<string, string[]> = {
   Talisman: ["Main Hand"],
 };
 
+/**
+ * Guides go in Documents, not AppData: the Microsoft Store version of Claude redirects AppData writes
+ * into its own package folder, so a guide written there isn't where its path says.
+ */
 export function guidesDir(): string {
   if (process.env.POE2BF_GUIDES_DIR) return process.env.POE2BF_GUIDES_DIR;
-  const base = process.env.APPDATA ?? join(homedir(), ".local", "share");
-  return join(base, "poe2-build-finder", "guides");
+  const documents = [join(homedir(), "Documents"), join(homedir(), "OneDrive", "Documents")].find((d) => existsSync(d));
+  return join(documents ?? homedir(), "PoE2 Build Planner", "guides");
 }
 
-export function openInBrowser(path: string): void {
-  if (process.env.POE2BF_NO_OPEN) return;
+/** Open a file in the default browser; resolves true only if the launch succeeded. */
+export function openInBrowser(path: string): Promise<boolean> {
+  if (process.env.POE2BF_NO_OPEN) return Promise.resolve(false);
   const [cmd, args] =
     process.platform === "win32"
-      ? ["cmd", ["/c", "start", "", path]]
+      ? ["cmd", ["/c", "start", '""', `"${path}"`]]
       : process.platform === "darwin"
         ? ["open", [path]]
         : ["xdg-open", [path]];
-  const child = spawn(cmd, args as string[], { detached: true, stdio: "ignore", windowsHide: true });
-  child.on("error", () => {});
-  child.unref();
+  return new Promise((resolveOpen) => {
+    const child = spawn(cmd, args as string[], {
+      stdio: "ignore",
+      windowsHide: true,
+      windowsVerbatimArguments: process.platform === "win32",
+    });
+    const timer = setTimeout(() => resolveOpen(false), 10_000);
+    child.on("error", () => {
+      clearTimeout(timer);
+      resolveOpen(false);
+    });
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      resolveOpen(code === 0);
+    });
+  });
 }
 
 export interface GuideResult {
+  /** True only if the browser launch succeeded. */
+  opened: boolean;
   path: string;
   dir: string;
   buildFiles: string[];
@@ -216,9 +239,12 @@ export async function createGuide(
         const evaluation = await evaluateBuild(options.engine, data, {
           cls: input.cls,
           ascendancyName: input.ascendancyName,
+          ascendancyId: input.ascendancyId,
           level: phase.levels[1],
           passives: [...allocated.map((p) => p.key), ...ascKeys],
           skills: skills.map((s) => ({ gem: s.gem, supports: s.supports.map((x) => x.gem) })),
+          items: phase.items,
+          tree,
           gear: {
             kind: "budget",
             terms: input.terms?.length ? input.terms : main.tags.filter((t) => !["intelligence", "strength", "dexterity", "repeatable"].includes(t)),
@@ -307,6 +333,7 @@ export async function createGuide(
 
   const path = join(dir, "index.html");
   await writeFile(path, renderGuide(model));
-  if (options.open !== false) openInBrowser(path);
-  return { path, dir, buildFiles, warningsByPhase };
+  if (!existsSync(path)) throw new Error(`The guide was written but isn't at ${path}; the folder may be redirected.`);
+  const opened = options.open !== false ? await openInBrowser(path) : false;
+  return { path, dir, buildFiles, warningsByPhase, opened };
 }

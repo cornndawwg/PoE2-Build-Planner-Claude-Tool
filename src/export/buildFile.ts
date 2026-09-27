@@ -7,7 +7,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { GameData } from "../data/gamedata.js";
 import type { PlayerGem } from "../data/gamedata.js";
-import { canSupport, findGem, skillOf } from "../skills/skills.js";
+import { validateSkills } from "../build/validate.js";
+import { findGem } from "../skills/skills.js";
 
 type LevelInterval = number | [number, number];
 
@@ -183,25 +184,17 @@ export function toBuildFile(data: GameData, plan: BuildPlan): BuildResult {
       continue;
     }
     if (gem.source === "item") warnings.push(`${gem.name} comes from an item, not a gem; the Build Planner may not show it`);
-    const active = skillOf(data, gem);
-    const supports: (string | BuildSupport)[] = [];
-    const families = new Map<string, string>();
-    for (const sup of s.supports ?? []) {
+    const supportGems = (s.supports ?? []).flatMap((sup) => {
       const supportGem = lookup(sup.gemId);
-      if (!supportGem) continue;
-      if (supportGem.kind !== "support") {
-        errors.push(`${supportGem.name} is not a support gem`);
-        continue;
-      }
-      const supportSkill = skillOf(data, supportGem);
-      if (active && supportSkill && !canSupport(supportSkill, active).ok) {
-        warnings.push(`${supportGem.name} can't support ${gem.name}`);
-      }
-      if (supportGem.family) {
-        const clash = families.get(supportGem.family);
-        if (clash) warnings.push(`${supportGem.name} and ${clash} are the same support family; only one can go on ${gem.name}`);
-        families.set(supportGem.family, supportGem.name);
-      }
+      return supportGem ? [{ sup, supportGem }] : [];
+    });
+    // Same rules as check_build: rule errors stop the export before anything is written.
+    for (const issue of validateSkills(data, [{ gem, supports: supportGems.map((x) => x.supportGem) }])) {
+      (issue.severity === "error" ? errors : warnings).push(issue.message);
+    }
+    const supports: (string | BuildSupport)[] = [];
+    for (const { sup, supportGem } of supportGems) {
+      if (supportGem.kind !== "support") continue;
       const entry: BuildSupport = { id: supportGem.gameId };
       if (sup.fromLevel !== undefined) entry.level_interval = interval(sup.fromLevel);
       if (sup.note) entry.additional_text = plain(sup.note);

@@ -53,6 +53,7 @@ The first start downloads about 30 MB of game data to `%APPDATA%\poe2-build-find
 | :- | :- |
 | `list_classes` | Classes and released ascendancies |
 | `search_skills` | Skills by tags/types/weapon, with where each comes from |
+| `gem_details` | Everything about one gem: tags, skill types, description, level 1/20 text, Spirit cost, recommended supports |
 | `compatible_supports` | Supports that work with a skill, ranked with reasons |
 | `find_passives` | Notables/keystones/ascendancy notables that scale the build, with drawback flags |
 | `plan_passive_tree` | Cheapest path to the chosen passives, with the level to take each point |

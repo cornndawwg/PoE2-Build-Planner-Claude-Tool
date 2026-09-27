@@ -50,6 +50,9 @@ local STAT_KEYS = {
   "TotalEHP", "TotalNumberOfHits", "EHPSurvivalTime", "totalEnemyDamageIn", "SecondMinimalMaximumHitTaken",
   "PhysicalMaximumHitTaken", "FireMaximumHitTaken", "ColdMaximumHitTaken", "LightningMaximumHitTaken", "ChaosMaximumHitTaken",
   "Armour", "Evasion", "BlockChance", "MovementSpeedMod",
+  -- Damage over time, separate from hits.
+  "TotalDot", "TotalDotDPS", "IgniteDPS", "PoisonDPS", "BleedDPS", "TotalIgniteDPS", "TotalPoisonDPS", "TotalBleedDPS",
+  "WithIgniteDPS", "WithPoisonDPS", "WithBleedDPS",
   "Str", "Dex", "Int", "ReqStr", "ReqDex", "ReqInt",
 }
 
@@ -70,6 +73,18 @@ local function collectStats()
     stats.MinionLife = out.Minion.Life
   end
   return stats
+end
+
+--- A unique's item text from Path of Building's data, by exact name (case-insensitive).
+local function uniqueText(name)
+  local wanted = name:lower()
+  for _, list in pairs(data.uniques) do
+    for _, raw in ipairs(list) do
+      local first = raw:match("^%s*([^\r\n]+)")
+      if first and first:lower() == wanted then return "Rarity: UNIQUE\n" .. raw:gsub("^%s+", "") end
+    end
+  end
+  return nil
 end
 
 local function equip(raw, slot)
@@ -102,7 +117,10 @@ function methods.evaluate(p)
 
   local hashes = {}
   for _, id in ipairs(p.passives or {}) do hashes[#hashes + 1] = tonumber(id) end
-  build.spec:ImportFromNodeList(p.className, nil, nil, nil, hashes, {}, {}, {}, nil)
+  -- "+5 to any Attribute" nodes: { [nodeId] = 1 (Strength) | 2 (Dexterity) | 3 (Intelligence) }.
+  for id, choice in pairs(p.attributes or {}) do build.spec:SwitchAttributeNode(tonumber(id), tonumber(choice)) end
+  local overrides = build.spec.hashOverrides or {}
+  build.spec:ImportFromNodeList(p.className, nil, nil, nil, hashes, {}, overrides, {}, nil)
   local allocated = 0
   for _ in pairs(build.spec.allocNodes) do allocated = allocated + 1 end
 
@@ -133,8 +151,15 @@ function methods.evaluate(p)
   build.configTab:BuildModList()
 
   for _, item in ipairs(p.items or {}) do
-    local err = equip(item.raw, item.slot)
-    if err then notes[#notes + 1] = err end
+    local raw = item.raw
+    if not raw and item.unique then
+      raw = uniqueText(item.unique)
+      if not raw then notes[#notes + 1] = "Path of Building has no unique called '" .. item.unique .. "'" end
+    end
+    if raw then
+      local err = equip(raw, item.slot)
+      if err then notes[#notes + 1] = err end
+    end
   end
 
   for _, text in ipairs(p.skills or {}) do build.skillsTab:PasteSocketGroup(text) end
