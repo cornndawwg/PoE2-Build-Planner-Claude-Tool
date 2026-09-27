@@ -41,6 +41,21 @@ export interface GuidePhase {
   checkWarnings: string[];
   questRewards: string[];
   buildFile?: string;
+  /** Path of Building numbers at the phase's last level, with assumed budget gear. */
+  numbers?: {
+    level: number;
+    clearDps: number;
+    rareSeconds?: number;
+    bossDps: number;
+    bossSeconds?: number;
+    bossLabel: string;
+    hitsFromNormal?: number;
+    hitsFromBoss?: number;
+    life?: number;
+    energyShield?: number;
+    resistances: { fire?: number; cold?: number; lightning?: number; chaos?: number };
+  };
+  verdicts?: { content: string; overall: string; weakPoint?: string; fixFirst?: string }[];
 }
 
 export interface GuideModel {
@@ -161,13 +176,29 @@ function phaseHtml(p: GuidePhase, i: number): string {
     ? `<div class="callout warn"><strong>Checks at level ${p.levels[1]}</strong>${list(p.checkWarnings)}</div>`
     : `<div class="callout ok"><strong>Checks at level ${p.levels[1]}:</strong> skills available, attributes, Spirit and passive points all fit.</div>`;
 
+  const fmt = (n: number | undefined, unit = "") => (n === undefined ? "—" : `${n.toLocaleString("en-US")}${unit}`);
+  const numbers = p.numbers
+    ? `<div class="card"><h3>Numbers at level ${p.numbers.level} <span class="muted small">(Path of Building, assumed budget gear)</span></h3>
+  <div class="stats">
+    <div><span class="k">Clear DPS</span><span class="v">${fmt(p.numbers.clearDps)}</span><span class="s">rare dies in ${fmt(p.numbers.rareSeconds, " s")}</span></div>
+    <div><span class="k">Boss DPS</span><span class="v">${fmt(p.numbers.bossDps)}</span><span class="s">${esc(p.numbers.bossLabel)} in ${fmt(p.numbers.bossSeconds, " s")}</span></div>
+    <div><span class="k">Life / ES</span><span class="v">${fmt(p.numbers.life)} / ${fmt(p.numbers.energyShield)}</span><span class="s">hits survived: ${fmt(p.numbers.hitsFromNormal)} normal, ${fmt(p.numbers.hitsFromBoss)} boss</span></div>
+    <div><span class="k">Resistances</span><span class="v">${[p.numbers.resistances.fire, p.numbers.resistances.cold, p.numbers.resistances.lightning].map((r) => fmt(r === undefined ? undefined : Math.round(r), "%")).join(" / ")}</span><span class="s">fire / cold / lightning · chaos ${fmt(p.numbers.resistances.chaos, "%")}</span></div>
+  </div></div>`
+    : "";
+  const bands = (p.verdicts ?? [])
+    .map((v) => `<div class="verdict band-${esc(v.overall.replace(/\s+/g, "-").toLowerCase())}"><span class="badge-band">${esc(v.overall)}</span> for ${esc(v.content)}${v.weakPoint ? ` — weak point: ${esc(v.weakPoint)}. <span class="muted">${esc(v.fixFirst ?? "")}</span>` : ""}</div>`)
+    .join("");
+
   return `<section class="phase" id="phase-${i}" ${i === 0 ? "" : "hidden"}>
   <div class="phase-head"><h2>${esc(p.name)}</h2><span class="levels">Levels ${p.levels[0]}–${p.levels[1]}</span>${
     p.buildFile ? `<a class="button" href="${encodeURI(p.buildFile)}" download>Download Build Planner file</a>` : ""
   }</div>
   ${para(p.summary)}
+  ${bands}
   ${p.assessment ? `<div class="callout assess"><strong>Viability:</strong> ${esc(p.assessment)}</div>` : ""}
   ${checks}
+  ${numbers}
   <div class="grid">
     <div class="card"><h3>Skills &amp; supports</h3>${skills || '<p class="muted">No changes this phase.</p>'}</div>
     <div class="card"><h3>Key passives <span class="muted small">(${p.pointsUsed}/${p.pointsAvailable} points)</span></h3>${passives ? `<ul class="plain">${passives}</ul>` : '<p class="muted">Small passives only this phase.</p>'}${asc ? `<h3>Ascendancy</h3><ul class="plain">${asc}</ul>` : ""}</div>
@@ -215,7 +246,11 @@ h2{margin:0;font-size:22px}h3{margin:0 0 8px;font-size:16px;color:var(--accent)}
 .tree .n[class*=" a"]{stroke-width:10}.zoom{position:absolute;right:10px;top:10px;display:flex;gap:6px;z-index:1}
 .zoom button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;width:32px;height:32px;cursor:pointer;font-size:18px}
 .legend{display:flex;gap:14px;font-size:13px;color:var(--muted);margin:6px 0}.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:middle}
-.asc svg{width:100%;max-height:260px}footer{max-width:1150px;margin:auto;padding:16px;color:var(--muted);font-size:13px;border-top:1px solid var(--line)}
+.asc svg{width:100%;max-height:260px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}.stats div{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px}
+.stats .k{display:block;font-size:12px;color:var(--muted)}.stats .v{display:block;font-size:20px;font-weight:700}.stats .s{display:block;font-size:12px;color:var(--muted)}
+.verdict{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:8px 0}.badge-band{font-weight:700;padding:2px 8px;border-radius:999px;margin-right:6px;color:#111}
+.band-comfortable .badge-band{background:var(--ok)}.band-workable .badge-band{background:#b9d36c}.band-borderline .badge-band{background:#e8b04a}.band-not-yet .badge-band{background:var(--warn)}footer{max-width:1150px;margin:auto;padding:16px;color:var(--muted);font-size:13px;border-top:1px solid var(--line)}
 ${phaseCss(m.phases.length)}
 </style></head>
 <body data-phase="0">

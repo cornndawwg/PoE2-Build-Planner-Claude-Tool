@@ -12,6 +12,9 @@ import { availableFromLevel } from "../skills/levels.js";
 import { findGem } from "../skills/skills.js";
 import { stripMarkup } from "../text.js";
 import { nodeKind, type PassiveTree } from "../tree/tree.js";
+import { evaluateBuild } from "../engine/evaluate.js";
+import type { PobEngine } from "../engine/pob.js";
+import type { DefenceStyle } from "../gear/priorities.js";
 import { renderGuide, type GuideModel, type GuidePhase } from "./render.js";
 
 export interface GuidePassiveInput {
@@ -52,6 +55,11 @@ export interface GuideInput {
   /** Ascendancy passives with the phase (0-based) they're taken in; default: the last phase. */
   ascendancyPassives?: { id: string; phase?: number }[];
   phases: GuidePhaseInput[];
+  /** For the assumed gear in Path of Building numbers (as for stat_priorities). */
+  terms?: string[];
+  avoid?: string[];
+  defence?: DefenceStyle[];
+  weapons?: string[];
 }
 
 /** Guide slot names (from stat_priorities) mapped to Build Planner inventory slots. */
@@ -113,7 +121,7 @@ export async function createGuide(
   tree: PassiveTree,
   resolveNode: (ref: string) => string,
   input: GuideInput,
-  options: { open?: boolean; toolVersion: string },
+  options: { open?: boolean; toolVersion: string; engine?: PobEngine | null },
 ): Promise<GuideResult> {
   if (input.phases.length === 0) throw new Error("A guide needs at least one phase.");
   const phases = [...input.phases].sort((a, b) => a.levels[0] - b.levels[0]);
@@ -199,6 +207,46 @@ export async function createGuide(
     }
     warningsByPhase[phase.name] = warnings;
 
+    // Real numbers at the end of the phase, when the Path of Building engine is available.
+    let numbers: GuidePhase["numbers"];
+    let verdicts: GuidePhase["verdicts"];
+    if (options.engine && skills.length > 0) {
+      try {
+        const main = skills[0]!.gem;
+        const evaluation = await evaluateBuild(options.engine, data, {
+          cls: input.cls,
+          ascendancyName: input.ascendancyName,
+          level: phase.levels[1],
+          passives: [...allocated.map((p) => p.key), ...ascKeys],
+          skills: skills.map((s) => ({ gem: s.gem, supports: s.supports.map((x) => x.gem) })),
+          gear: {
+            kind: "budget",
+            terms: input.terms?.length ? input.terms : main.tags.filter((t) => !["intelligence", "strength", "dexterity", "repeatable"].includes(t)),
+            avoid: input.avoid,
+            defence: input.defence?.length ? input.defence : ["life"],
+            weapons: input.weapons,
+          },
+        });
+        numbers = {
+          level: evaluation.level,
+          clearDps: evaluation.clear.dps,
+          rareSeconds: evaluation.clear.secondsToKill.rare,
+          bossDps: evaluation.boss.dps,
+          bossSeconds: evaluation.boss.secondsToKill.boss,
+          bossLabel: evaluation.boss.enemy,
+          hitsFromNormal: evaluation.survival.hitsFromNormal,
+          hitsFromBoss: evaluation.survival.hitsFromBoss,
+          life: evaluation.defence.life,
+          energyShield: evaluation.defence.energyShield,
+          resistances: evaluation.defence.resistances,
+        };
+        verdicts = evaluation.verdicts.map(({ content, overall, weakPoint, fixFirst }) => ({ content, overall, weakPoint, fixFirst }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        warnings.push(`Path of Building numbers unavailable: ${message.split(/\r?\n/)[0]}`);
+      }
+    }
+
     const newKeys = allocated.filter((p) => firstPhase.get(p.key) === i);
     guidePhases.push({
       name: phase.name,
@@ -225,6 +273,8 @@ export async function createGuide(
         .filter((q) => q.areaLevel >= phase.levels[0] && q.areaLevel <= phase.levels[1])
         .map((q) => `${q.act} — ${q.quest}: ${q.reward ?? `choose ${q.options?.join(" or ")}`}`),
       buildFile,
+      numbers,
+      verdicts,
     });
   }
 

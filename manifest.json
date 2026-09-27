@@ -48,6 +48,10 @@
       "description": "Check skill availability, attributes, Spirit and passive budget at a level"
     },
     {
+      "name": "evaluate_build",
+      "description": "Path of Building numbers and a viability verdict at a level"
+    },
+    {
       "name": "stat_priorities",
       "description": "Gear and jewel stats to look for"
     },

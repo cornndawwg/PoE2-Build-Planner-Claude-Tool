@@ -50,6 +50,18 @@ await call("check_build", {
   passives: plan.passives.map((p: { id: string }) => p.id),
   skills: [{ gemId: "Fireball", supports: ["Fiery Death"] }, { gemId: "Herald of Ash" }],
 });
+const evaluation = JSON.parse(
+  await call("evaluate_build", {
+    class: "Infernalist",
+    level: 45,
+    passives: plan.passives.map((p: { id: string }) => p.id),
+    skills: [{ gemId: "Fireball", supports: ["Fiery Death"] }],
+    terms: ["fire", "spell", "cast speed"],
+    avoid: ["attack"],
+    defence: ["energy shield"],
+  }),
+);
+if (evaluation.available && !(evaluation.clear?.dps > 0)) process.exitCode = 1;
 await call("find_uniques", { terms: ["fire", "spell"], slots: ["Amulet", "Wand"], limit: 3 });
 await call("export_build", {
   name: "Smoke Test Fireball",

@@ -12,6 +12,8 @@ import { DEFENCE_STYLES, SLOT_CLASSES, statPriorities } from "./gear/priorities.
 import { findUniques } from "./gear/uniques.js";
 import { checkBuild } from "./build/checks.js";
 import { levelingPhases } from "./build/phases.js";
+import { evaluateBuild } from "./engine/evaluate.js";
+import { findEngine, PobEngine } from "./engine/pob.js";
 import { createGuide } from "./guide/guide.js";
 import { compatibleSupports, findGem, searchSkills } from "./skills/skills.js";
 import { findScaling } from "./tree/scaling.js";
@@ -34,9 +36,19 @@ First ask: is this a league start (new character from level 1) or an existing ch
 
 League start: call leveling_phases and plan every phase, not just the end-game build. For each phase pick skills the character can use by then (search_skills with availableBy), supports, the passives to take during it, and gear to look for (stat_priorities with itemLevel ≈ the phase's levels). Run check_build at each phase's checkpointLevel and fix what it flags before moving on. If the final build is weak early, use a different leveling skill or setup and say when to switch. Mention useful quest rewards in each phase.
 
-Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → stat_priorities → find_uniques → export_build (ask the player first) → create_build_guide to lay it all out as a web page (ask first; it opens in their browser). For a league start, export one Build Planner file per phase whose setup differs (e.g. "Name - 1 Acts 1-2", "Name - 2 Acts 3-4", "Name - 3 Maps"), so the player can switch plans in game.
+Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → evaluate_build (real numbers and a verdict per phase) → stat_priorities → find_uniques → export_build (ask the player first) → create_build_guide to lay it all out as a web page (ask first; it opens in their browser). For a league start, export one Build Planner file per phase whose setup differs (e.g. "Name - 1 Acts 1-2", "Name - 2 Acts 3-4", "Name - 3 Maps"), so the player can switch plans in game.
 
 This tool isn't affiliated with or endorsed by Grinding Gear Games in any way.`;
+
+let engine: PobEngine | null | undefined;
+
+/** The Path of Building engine, started on first use; null if it isn't installed. */
+function getEngine(): PobEngine | null {
+  if (engine !== undefined) return engine;
+  const paths = findEngine();
+  engine = paths ? new PobEngine(paths, log) : null;
+  return engine;
+}
 
 let dataPromise: Promise<{ data: GameData; tree: PassiveTree }> | undefined;
 
@@ -266,6 +278,67 @@ server.registerTool(
 );
 
 server.registerTool(
+  "evaluate_build",
+  {
+    title: "Calculate a build with Path of Building",
+    description:
+      "Real numbers from Path of Building's calculation engine for a planned build at a character level: damage against normal " +
+      "monsters and against a boss, seconds to kill a normal/rare monster and a boss, hits you survive from monsters and bosses, " +
+      "life, energy shield, resistances (with the campaign's resistance penalty and only the quest rewards earned by that level), " +
+      "Spirit and attributes, plus a verdict band (Comfortable / Workable / Borderline / Not yet) with the weak point and what to fix " +
+      "first. Level 65+ is judged for early maps, T15 and juiced T16. By default it assumes budget rare gear for that level (a few " +
+      "mid-roll mods per slot, based on `terms` and `defence`); pass `gear: \"none\"` for no gear. Use it at each phase's checkpoint. " +
+      "Numbers are estimates: assumed gear and heuristic bands, not guarantees. Windows only for now.",
+    inputSchema: {
+      class: z.string().describe("Class or ascendancy name"),
+      ascendancy: z.string().optional(),
+      level: z.number().int().min(1).max(100),
+      passives: z.array(z.string()).describe("Main-tree passives taken by this level (key, id or exact name)"),
+      ascendancyPassives: z.array(z.string()).optional(),
+      skills: z.array(z.object({ gemId: z.string().describe("gemId or exact name"), supports: z.array(z.string()).optional() })).min(1),
+      mainSkill: z.number().int().min(0).optional().describe("0-based index of the main damage skill (default 0)"),
+      terms: z.array(z.string()).optional().describe("What the build scales, for the assumed gear (as for stat_priorities)"),
+      avoid: z.array(z.string()).optional(),
+      defence: z.array(z.enum(DEFENCE_STYLES)).optional().describe("Defence layers for the assumed gear (default: life)"),
+      weapons: z.array(z.string()).optional().describe("Weapon item classes to assume, e.g. [\"Staff\"] or [\"Wand\", \"Focus\"]"),
+      gear: z.enum(["budget", "none"]).optional(),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) =>
+    run(async () => {
+      const { data, tree } = await gameData();
+      const engine = getEngine();
+      if (!engine) {
+        return json({
+          available: false,
+          reason:
+            process.platform === "win32"
+              ? "The Path of Building engine files aren't installed with this copy of the tool."
+              : "The Path of Building engine currently ships for Windows only.",
+          hint: "Use check_build for rule-based checks instead.",
+        });
+      }
+      const { cls, asc } = findClass(data, args.class, args.ascendancy);
+      const skills = args.skills.map((s) => ({ gem: findGem(data, s.gemId), supports: s.supports?.map((id) => findGem(data, id)) }));
+      const terms = args.terms?.length ? args.terms : skills[args.mainSkill ?? 0]!.gem.tags.filter((t) => !["intelligence", "strength", "dexterity", "repeatable"].includes(t));
+      const evaluation = await evaluateBuild(engine, data, {
+        cls,
+        ascendancyName: asc?.name,
+        level: args.level,
+        passives: [...args.passives, ...(args.ascendancyPassives ?? [])].map((p) => resolveNode(tree, p)),
+        skills,
+        mainSkill: args.mainSkill,
+        gear:
+          args.gear === "none"
+            ? { kind: "none" }
+            : { kind: "budget", terms, avoid: args.avoid, defence: args.defence?.length ? args.defence : ["life"], weapons: args.weapons },
+      });
+      return json({ available: true, ...evaluation });
+    }),
+);
+
+server.registerTool(
   "stat_priorities",
   {
     title: "Gear and jewel stat priorities",
@@ -398,7 +471,8 @@ server.registerTool(
       "Write a full build guide as a local web page and open it in the player's browser (like a Maxroll or Mobalytics guide): " +
       "overview, strengths and weaknesses, a tab per phase (skills and supports, key passives with levels, ascendancy, gear to look " +
       "for, quest rewards, a checklist before moving on, when to switch setups), automatic checks per phase, a zoomable passive tree " +
-      "highlighting each phase, and a downloadable Build Planner file per phase. Use after planning; ask the player first. " +
+      "highlighting each phase, and a downloadable Build Planner file per phase. When the Path of Building engine is available, each " +
+      "phase also gets real numbers and a verdict band at its last level. Use after planning; ask the player first. " +
       "passivePlan is the plan_passive_tree output (id + takeAtLevel); phases split it by level. Give a phase its own passives only " +
       "when it respecs. Gear slots use stat_priorities names (Ring, Wand, Focus…).",
     inputSchema: {
@@ -411,6 +485,10 @@ server.registerTool(
       strengths: z.array(z.string()).optional(),
       weaknesses: z.array(z.string()).optional(),
       notes: z.array(z.string()).optional(),
+      terms: z.array(z.string()).optional().describe("What the build scales, for the assumed gear in Path of Building numbers"),
+      avoid: z.array(z.string()).optional(),
+      defence: z.array(z.enum(DEFENCE_STYLES)).optional().describe("Defence layers for the assumed gear (default: life)"),
+      weapons: z.array(z.string()).optional(),
       passivePlan: z.array(guidePassive),
       ascendancyPassives: z
         .array(z.object({ id: z.string(), phase: z.number().int().min(0).optional().describe("0-based phase index it's taken in") }))
@@ -463,8 +541,12 @@ server.registerTool(
           passivePlan: args.passivePlan,
           ascendancyPassives: args.ascendancyPassives,
           phases: args.phases,
+          terms: args.terms,
+          avoid: args.avoid,
+          defence: args.defence,
+          weapons: args.weapons,
         },
-        { open: args.open, toolVersion: VERSION },
+        { open: args.open, toolVersion: VERSION, engine: getEngine() },
       );
       return json({
         opened: args.open !== false,
@@ -561,6 +643,15 @@ server.registerTool(
       });
     }),
 );
+
+// Don't leave Path of Building running after Claude closes the extension.
+const shutdown = () => {
+  if (engine) engine.stop();
+};
+process.on("exit", shutdown);
+for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => process.exit(0));
+process.stdin.on("end", () => process.exit(0));
+server.server.onclose = shutdown;
 
 await server.connect(new StdioServerTransport());
 log(`v${VERSION} ready`);
