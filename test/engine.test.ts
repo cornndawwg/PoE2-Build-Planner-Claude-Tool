@@ -27,7 +27,7 @@ describe("verdict", () => {
 
   it("requires capped resistances in maps", () => {
     const v = verdict({ content: "T15", rareSeconds: 1, bossSeconds: 10, normalHits: 20, bossHits: 5, missingResistance: { lightning: 12 } });
-    expect(v.survival).toBe("Workable");
+    expect(v.survival).toBe("Borderline");
     expect(v.fixFirst).toMatch(/12% lightning/);
   });
 

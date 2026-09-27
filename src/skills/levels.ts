@@ -21,5 +21,6 @@ export function gemLevelForCharacter(characterLevel: number): number {
  */
 export function availableFromLevel(gem: PlayerGem): number | undefined {
   if (gem.kind === "support" || gem.source !== "uncut-gem" || gem.tier < 1) return undefined;
-  return GEM_LEVEL_REQUIREMENT[Math.min(gem.tier, GEM_LEVEL_REQUIREMENT.length) - 1];
+  // Tier 1 gems need character level 0 in the table, i.e. usable from the start (level 1).
+  return Math.max(1, GEM_LEVEL_REQUIREMENT[Math.min(gem.tier, GEM_LEVEL_REQUIREMENT.length) - 1]!);
 }

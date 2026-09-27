@@ -26,6 +26,8 @@ import { findUniques } from "./gear/uniques.js";
 import { checkBuild } from "./build/checks.js";
 import { validateSkills } from "./build/validate.js";
 import { levelingPhases } from "./build/phases.js";
+import { BUDGETS, BUTTONS, gearTierFor, INTAKE_QUESTIONS, PURPOSES, PUSHES } from "./build/goals.js";
+import { optimizeBuild, type Objective } from "./engine/optimize.js";
 import { compareBuilds } from "./engine/compare.js";
 import { evaluateBuild, type EvaluateInput } from "./engine/evaluate.js";
 import { findEngine, PobEngine } from "./engine/pob.js";
@@ -38,20 +40,26 @@ import { completePassives } from "./tree/complete.js";
 import { findScaling } from "./tree/scaling.js";
 import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, withLevels } from "./tree/tree.js";
 
-const VERSION = "0.4.1";
+const VERSION = "0.5.0";
 const log = (message: string) => process.stderr.write(`[poe2-build-planner] ${message}\n`);
 
 const INSTRUCTIONS = `Tools for planning Path of Exile 2 builds (game version 0.5) for casual players.
 
 How to help the player:
 - Start from their play fantasy, not from what's strongest. Stay true to it; if part of it isn't viable, say so plainly and offer the closest version that is.
-- Assume a modest budget and self-found gear unless they say otherwise.
+- Don't assume what they want: ask first (build_intake), then build for their answers — their budget, their goal, their number of buttons.
 - Explain every choice briefly in plain language — players may be new to the game.
 - Tools return candidates, not decisions: read the stat text and pick what actually fits. Keystones are build-defining and often have big drawbacks; check the "drawbacks" field.
 - Defences are a baseline every build needs; keep that advice short and focus on what makes their idea work.
 - Verdicts and numbers are estimates, not guarantees.
 
-First ask: is this a league start (new character from level 1) or an existing character? For an existing character, ask their level and roughly what gear they have, and plan from there.
+Before planning anything, call build_intake and ask its questions in one short message: fantasy, league start or existing character, what the build is for (campaign, fast mapping, bossing, balanced), how far they realistically want to push (campaign … pinnacle bosses), one-button or several, budget, softcore/hardcore, dislikes. Skip what they already told you. Pass the answers as "goals" to evaluate_build, optimize_build and compare_builds. For an existing character, plan from their level and gear.
+
+Be honest about the goal. After the first evaluate_build at the level that matters for their goal (85-90 for end-game goals), read goalCheck. If it isn't "on track", tell them plainly before going further — e.g. "Pinnacle bosses could be rough with this build: a boss takes about 3 minutes and one big hit kills you." — and offer its options: tweak it (optimize_build), see it with a bigger budget, change the setup (compare_builds), aim a bit lower, or look at a different build for the same fantasy. Let them choose. Never call a build good when the numbers say otherwise.
+
+Push it as far as it goes: run optimize_build (objective from their purpose), apply the changes that make sense for the fantasy, and evaluate again. Aim for the most damage at end game without giving up survivability: resistances capped, enough life/ES and hits survived for their goal (Hardcore needs more).
+
+A finished build uses what it has: fill the Spirit (Spirit skills, or a free one from a Lament/Portent/Absent Amulet), add a boss or single-target skill and a curse, mark, warcry or banner unless they asked for one button, and consider an anoint, runes and flasks. evaluate_build's setupGaps lists what's missing; resolve or explain each gap before calling the build done.
 
 League start: call leveling_phases and plan every phase, not just the end-game build. For each phase pick skills the character can use by then (search_skills with availableBy), supports, the passives to take during it, and gear to look for (stat_priorities with itemLevel ≈ the phase's levels). Run check_build at each phase's checkpointLevel and fix what it flags before moving on. If the final build is weak early, use a different leveling skill or setup and say when to switch. Mention useful quest rewards in each phase.
 
@@ -65,7 +73,7 @@ Costs: item_prices has live prices for currency, runes, soul cores, Liquid Emoti
 3. Otherwise, briefly explain how to check it: open the link, sort by price, and ignore the few cheapest listings (often fake or already sold).
 Budget/mid/high gear: evaluate_build's gearTier.
 
-Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → evaluate_build (real numbers and a verdict per phase) → stat_priorities → suggest_extras (Spirit skills, free-Spirit amulets, jewels, flasks and charms, anoints, runes and soul cores) → find_uniques → export_build (ask the player first) → create_build_guide to lay it all out as a web page (ask first; it opens in their browser). For a league start, export one Build Planner file per phase whose setup differs (e.g. "Name - 1 Acts 1-2", "Name - 2 Acts 3-4", "Name - 3 Maps"), so the player can switch plans in game.
+Typical flow: build_intake (ask) → list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → evaluate_build with goals (be honest about goalCheck) → optimize_build → evaluate again → stat_priorities → suggest_extras (Spirit skills, free-Spirit amulets, jewels, flasks and charms, anoints, runes and soul cores) → find_uniques → export_build (ask the player first) → create_build_guide to lay it all out as a web page (ask first; it opens in their browser). For a league start, export one Build Planner file per phase whose setup differs (e.g. "Name - 1 Acts 1-2", "Name - 2 Acts 3-4", "Name - 3 Maps"), so the player can switch plans in game.
 
 This tool isn't affiliated with or endorsed by Grinding Gear Games in any way.`;
 
@@ -384,6 +392,17 @@ server.registerTool(
 );
 
 /** One build to calculate; shared by evaluate_build and compare_builds. */
+/** What the player wants (from build_intake). */
+const goalsSchema = z
+  .object({
+    purpose: z.enum(PURPOSES).describe("campaign, mapping (fast map farming), bossing, or balanced"),
+    push: z.enum(PUSHES).describe("How far they realistically want to push: campaign, early maps, T15, T16 juiced, pinnacle"),
+    buttons: z.enum(BUTTONS).optional().describe("one-button, a few (2-4), or many"),
+    budget: z.enum(BUDGETS).optional().describe("self-found, modest or wealthy; sets end-game gearTier unless given"),
+    hardcore: z.boolean().optional(),
+  })
+  .describe("The player's goals from build_intake: stricter targets, an honest goalCheck, and budget-matched end-game gear");
+
 const buildSpec = {
   class: z.string().describe("Class or ascendancy name"),
   ascendancy: z.string().optional(),
@@ -392,6 +411,7 @@ const buildSpec = {
   ascendancyPassives: z.array(z.string()).optional(),
   skills: z.array(z.object({ gemId: z.string().describe("gemId or exact name"), supports: z.array(z.string()).optional() })).min(1),
   mainSkill: z.number().int().min(0).optional().describe("0-based index of the main damage skill (default 0)"),
+  goals: goalsSchema.optional(),
   terms: z.array(z.string()).optional().describe("What the build scales, for the assumed gear (as for stat_priorities)"),
   avoid: z.array(z.string()).optional(),
   defence: z.array(z.enum(DEFENCE_STYLES)).optional().describe("Defence layers for the assumed gear (default: life)"),
@@ -460,6 +480,7 @@ function toEvaluateInput(data: GameData, tree: PassiveTree, spec: BuildSpec) {
     mainSkill: spec.mainSkill,
     items: spec.items,
     tree,
+    goals: spec.goals,
     gear:
       spec.gear === "none"
         ? { kind: "none" }
@@ -469,7 +490,7 @@ function toEvaluateInput(data: GameData, tree: PassiveTree, spec: BuildSpec) {
             avoid: spec.avoid,
             defence: spec.defence?.length ? spec.defence : ["life"],
             weapons: spec.weapons,
-            tier: spec.gearTier,
+            tier: spec.gearTier ?? (spec.goals ? gearTierFor(spec.goals.budget, spec.level) : undefined),
           },
     extras: {
       anoint: spec.anoint,
@@ -509,7 +530,11 @@ server.registerTool(
       "monsters and against a boss, seconds to kill a normal/rare monster and a boss, hits you survive from monsters and bosses, " +
       "life, energy shield, resistances (with the campaign's resistance penalty and only the quest rewards earned by that level), " +
       "Spirit and attributes, plus a verdict band (Comfortable / Workable / Borderline / Not yet) with the weak point and what to fix " +
-      "first. Level 65+ is judged for early maps, T15 and juiced T16. Damage is broken down into hits, ignite, poison, bleed and " +
+      "first. Level 65+ is judged for early maps, T15 and juiced T16 (and pinnacle bosses when that's the goal). With `goals` (from " +
+      "build_intake) the targets follow the player's purpose and Hardcore, end-game gear follows their budget, and goalCheck says " +
+      "honestly whether the build is on track, rough or not realistic yet for what they want, with options to offer. setupGaps " +
+      "lists what the setup is missing (unused Spirit, no boss skill, no curse/mark/warcry/banner). At level 65+ the assumed rares " +
+      "get resistance mods added to cap resistances, as players do in maps. Damage is broken down into hits, ignite, poison, bleed and " +
       "minions. By default it assumes budget rare gear for that level (a few mid-roll mods per slot, based on `terms` and `defence`), " +
       "including a budget jewel in each allocated jewel socket; pass `items` to use specific uniques (by name) or pasted item text " +
       "in their slots (jewels too), or `gear: \"none\"` for no gear. Missing connecting passives are filled in (and listed), and " +
@@ -530,6 +555,73 @@ server.registerTool(
       const { input, skillIssues } = toEvaluateInput(data, tree, args);
       const evaluation = await evaluateBuild(engine, data, input);
       return json({ available: true, skillIssues, ...evaluation });
+    }),
+);
+
+server.registerTool(
+  "build_intake",
+  {
+    title: "Questions to ask before planning a build",
+    description:
+      "The questions to ask the player before planning anything, in one short message: their fantasy, league start or existing " +
+      "character, what the build is for (campaign, fast mapping, bossing, balanced), how far they realistically want to push " +
+      "(campaign … pinnacle bosses), how many buttons they want to press, budget, softcore/hardcore, and dislikes. Skip anything " +
+      "they already said. Pass the answers as `goals` to evaluate_build, compare_builds and optimize_build.",
+    annotations: { readOnlyHint: true },
+  },
+  async () =>
+    run(async () =>
+      json({
+        questions: INTAKE_QUESTIONS,
+        howToAsk:
+          "Ask these together in one friendly message (a short numbered list, with the options), not one at a time. Skip any the " +
+          "player already answered, and don't start planning until you have at least the fantasy, purpose, push and buttons.",
+        goalsFromAnswers: "goals: { purpose, push, buttons, budget, hardcore } — pass to evaluate_build / compare_builds / optimize_build.",
+      }),
+    ),
+);
+
+server.registerTool(
+  "optimize_build",
+  {
+    title: "Find more damage without losing survivability",
+    description:
+      "Tries likely changes to a build in Path of Building, one at a time, and keeps what measurably helps: support swaps on the " +
+      "main skill (or adding one to a free socket), notables that scale the build or its defences, Spirit skills, and an amulet " +
+      "anoint. `damage` lists changes that raise the objective (boss DPS, clear DPS or both) without giving up survivability " +
+      "(effective HP and max hit within 2%, resistances still capped); `survival` lists cheap survivability gains; `spiritSkills` " +
+      "shows what each Spirit skill measured; `combined` is the best compatible picks calculated together. Passive changes show " +
+      "their point cost and whether they fit the free points. Takes 10-40 seconds. A best-effort search, not a guaranteed best " +
+      "build; numbers are estimates. Use it after the first evaluate_build, and again after applying changes. Windows only for now.",
+    inputSchema: {
+      ...buildSpec,
+      objective: z
+        .enum(["clear", "boss", "balanced"])
+        .optional()
+        .describe("What to maximise. Default from goals.purpose: mapping → clear, bossing → boss, otherwise balanced"),
+      kinds: z.array(z.enum(["support", "passive", "spirit", "anoint"])).optional().describe("Default: all"),
+      maxEvaluations: z.number().int().min(5).max(80).optional().describe("Calculations to spend (default 40)"),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) =>
+    run(async () => {
+      const { data, tree } = await gameData();
+      const engine = getEngine();
+      if (!engine) return engineUnavailable();
+      const { input, skillIssues } = toEvaluateInput(data, tree, args);
+      const purpose = args.goals?.purpose;
+      const objective: Objective = args.objective ?? (purpose === "mapping" ? "clear" : purpose === "bossing" ? "boss" : "balanced");
+      const gear = input.gear.kind === "budget" ? input.gear : undefined;
+      const result = await optimizeBuild(engine, data, tree, input, {
+        objective,
+        terms: gear?.terms ?? input.skills[input.mainSkill ?? 0]!.gem.tags,
+        avoid: gear?.avoid,
+        defence: gear?.defence ?? ["life"],
+        kinds: args.kinds,
+        maxEvaluations: args.maxEvaluations ?? 40,
+      });
+      return json({ available: true, skillIssues, ...result });
     }),
 );
 
@@ -860,6 +952,7 @@ server.registerTool(
       avoid: z.array(z.string()).optional(),
       defence: z.array(z.enum(DEFENCE_STYLES)).optional().describe("Defence layers for the assumed gear (default: life)"),
       weapons: z.array(z.string()).optional(),
+      goals: goalsSchema.optional(),
       passivePlan: z.array(guidePassive),
       ascendancyPassives: z
         .array(z.object({ id: z.string(), phase: z.number().int().min(0).optional().describe("0-based phase index it's taken in") }))
@@ -920,6 +1013,7 @@ server.registerTool(
           avoid: args.avoid,
           defence: args.defence,
           weapons: args.weapons,
+          goals: args.goals,
         },
         { open: args.open, toolVersion: VERSION, engine: getEngine() },
       );

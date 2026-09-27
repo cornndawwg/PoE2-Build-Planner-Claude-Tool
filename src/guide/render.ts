@@ -9,6 +9,8 @@ export interface GuideSkill {
   availableFromLevel?: number;
   note?: string;
   supports: { name: string; tier: number; note?: string }[];
+  /** Spirit it reserves (persistent skills). */
+  spirit?: number;
 }
 
 export interface GuideGear {
@@ -56,6 +58,14 @@ export interface GuidePhase {
     resistances: { fire?: number; cold?: number; lightning?: number; chaos?: number };
   };
   verdicts?: { content: string; overall: string; weakPoint?: string; fixFirst?: string }[];
+  /** Which assumed gear the numbers use, e.g. "assumed budget gear". */
+  gearLabel?: string;
+  /** Spirit reserved and available by the end of the phase. */
+  spirit?: { reserved: number; available: number };
+  /** Honest check against the player's goal (end-game phases). */
+  goalCheck?: { status: string; goal: string; message: string; options: string[] };
+  /** What the setup is missing (unused Spirit, no boss skill…). */
+  setupGaps?: string[];
 }
 
 export interface GuideModel {
@@ -149,7 +159,19 @@ function phaseCss(count: number): string {
 }
 
 function phaseHtml(p: GuidePhase, i: number): string {
+  const spiritSkills = p.skills.filter((s) => s.spirit !== undefined);
+  const spiritCard =
+    spiritSkills.length || p.spirit
+      ? `<div class="card"><h3>Spirit &amp; buffs${p.spirit ? ` <span class="muted small">(${p.spirit.reserved}/${p.spirit.available} Spirit used)</span>` : ""}</h3>${
+          spiritSkills.length
+            ? `<ul class="plain">${spiritSkills
+                .map((s) => `<li><span class="gem">${esc(s.name)}</span> <span class="tag">${s.spirit} Spirit</span>${s.note ? `<div class="muted small">${esc(s.note)}</div>` : ""}${s.supports.length ? `<div class="muted small">Supports: ${esc(s.supports.map((x) => x.name).join(", "))}</div>` : ""}</li>`)
+                .join("")}</ul>`
+            : '<p class="muted">No Spirit skills yet.</p>'
+        }</div>`
+      : "";
   const skills = p.skills
+    .filter((s) => s.spirit === undefined)
     .map(
       (s) => `<div class="skill"><div class="skill-head"><span class="gem">${esc(s.name)}</span>${
         s.availableFromLevel !== undefined ? `<span class="tag">from level ${s.availableFromLevel}</span>` : ""
@@ -178,7 +200,7 @@ function phaseHtml(p: GuidePhase, i: number): string {
 
   const fmt = (n: number | undefined, unit = "") => (n === undefined ? "—" : `${n.toLocaleString("en-US")}${unit}`);
   const numbers = p.numbers
-    ? `<div class="card"><h3>Numbers at level ${p.numbers.level} <span class="muted small">(Path of Building, assumed budget gear)</span></h3>
+    ? `<div class="card"><h3>Numbers at level ${p.numbers.level} <span class="muted small">(Path of Building, ${esc(p.gearLabel ?? "assumed budget gear")})</span></h3>
   <div class="stats">
     <div><span class="k">Clear DPS</span><span class="v">${fmt(p.numbers.clearDps)}</span><span class="s">rare dies in ${fmt(p.numbers.rareSeconds, " s")}</span></div>
     <div><span class="k">Boss DPS</span><span class="v">${fmt(p.numbers.bossDps)}</span><span class="s">${esc(p.numbers.bossLabel)} in ${fmt(p.numbers.bossSeconds, " s")}</span></div>
@@ -190,12 +212,19 @@ function phaseHtml(p: GuidePhase, i: number): string {
     .map((v) => `<div class="verdict band-${esc(v.overall.replace(/\s+/g, "-").toLowerCase())}"><span class="badge-band">${esc(v.overall)}</span> for ${esc(v.content)}${v.weakPoint ? ` — weak point: ${esc(v.weakPoint)}. <span class="muted">${esc(v.fixFirst ?? "")}</span>` : ""}</div>`)
     .join("");
 
+  const goal = p.goalCheck
+    ? `<div class="callout ${p.goalCheck.status === "on track" ? "ok" : "warn"}"><strong>Your goal (${esc(p.goalCheck.goal)}): ${esc(p.goalCheck.status)}.</strong> ${esc(p.goalCheck.message)}${
+        p.goalCheck.status === "on track" ? "" : list(p.goalCheck.options)
+      }</div>`
+    : "";
+  const gaps = p.setupGaps?.length ? `<div class="callout switch"><strong>Could add:</strong>${list(p.setupGaps)}</div>` : "";
   return `<section class="phase" id="phase-${i}" ${i === 0 ? "" : "hidden"}>
   <div class="phase-head"><h2>${esc(p.name)}</h2><span class="levels">Levels ${p.levels[0]}–${p.levels[1]}</span>${
     p.buildFile ? `<a class="button" href="${encodeURI(p.buildFile)}" download>Download Build Planner file</a>` : ""
   }</div>
   ${para(p.summary)}
   ${bands}
+  ${goal}
   ${p.assessment ? `<div class="callout assess"><strong>Viability:</strong> ${esc(p.assessment)}</div>` : ""}
   ${checks}
   ${numbers}
@@ -203,6 +232,8 @@ function phaseHtml(p: GuidePhase, i: number): string {
     <div class="card"><h3>Skills &amp; supports</h3>${skills || '<p class="muted">No changes this phase.</p>'}</div>
     <div class="card"><h3>Key passives <span class="muted small">(${p.pointsUsed}/${p.pointsAvailable} points)</span></h3>${passives ? `<ul class="plain">${passives}</ul>` : '<p class="muted">Small passives only this phase.</p>'}${asc ? `<h3>Ascendancy</h3><ul class="plain">${asc}</ul>` : ""}</div>
   </div>
+  ${spiritCard}
+  ${gaps}
   ${gear ? `<div class="card"><h3>Gear to look for</h3><table class="gear">${gear}</table></div>` : ""}
   <div class="grid">
     ${p.questRewards.length ? `<div class="card"><h3>Quest rewards this phase</h3>${list(p.questRewards)}</div>` : ""}

@@ -6,7 +6,8 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { checkBuild } from "../build/checks.js";
+import { checkBuild, spiritCost } from "../build/checks.js";
+import { gearTierFor, type Goals } from "../build/goals.js";
 import type { GameData, PlayableClass } from "../data/gamedata.js";
 import { buildFileName, toBuildFile, type PlanSlot } from "../export/buildFile.js";
 import { availableFromLevel } from "../skills/levels.js";
@@ -63,6 +64,8 @@ export interface GuideInput {
   avoid?: string[];
   defence?: DefenceStyle[];
   weapons?: string[];
+  /** The player's goals (from build_intake): end-game gear by budget and an honest goal check. */
+  goals?: Goals;
 }
 
 /** Guide slot names (from stat_priorities) mapped to Build Planner inventory slots. */
@@ -233,6 +236,9 @@ export async function createGuide(
     // Real numbers at the end of the phase, when the Path of Building engine is available.
     let numbers: GuidePhase["numbers"];
     let verdicts: GuidePhase["verdicts"];
+    let goalCheck: GuidePhase["goalCheck"];
+    let setupGaps: string[] | undefined;
+    const tier = gearTierFor(input.goals?.budget, phase.levels[1]);
     if (options.engine && skills.length > 0) {
       try {
         const main = skills[0]!.gem;
@@ -251,8 +257,16 @@ export async function createGuide(
             avoid: input.avoid,
             defence: input.defence?.length ? input.defence : ["life"],
             weapons: input.weapons,
+            tier,
           },
+          goals: input.goals,
         });
+        // The goal is about the end game; earlier phases just get the setup check.
+        if (evaluation.goalCheck && (i === last || phase.levels[1] >= 65)) {
+          const g = evaluation.goalCheck;
+          goalCheck = { status: g.status, goal: g.goal, message: g.message, options: g.options };
+        }
+        setupGaps = evaluation.setupGaps;
         numbers = {
           level: evaluation.level,
           clearDps: evaluation.clear.dps,
@@ -284,7 +298,12 @@ export async function createGuide(
         availableFromLevel: availableFromLevel(s.gem),
         note: s.note,
         supports: s.supports.map((x) => ({ name: x.gem.name, tier: x.gem.tier, note: x.note })),
+        spirit: s.gem.kind === "spirit" || spiritCost(data, s.gem) ? spiritCost(data, s.gem) ?? 0 : undefined,
       })),
+      spirit: { reserved: check.spirit.reserved, available: check.spirit.fromQuests + check.spirit.fromPassives + check.spirit.fromGear },
+      gearLabel: `assumed ${tier} gear`,
+      goalCheck,
+      setupGaps,
       keyPassives: newKeys
         .map((p) => ({ ...describe(p.key), level: p.level }))
         .filter((p) => p.kind !== "small" && p.kind !== "attribute"),

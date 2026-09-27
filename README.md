@@ -51,6 +51,7 @@ The first start downloads about 30 MB of game data to `%APPDATA%\poe2-build-find
 
 | Tool | What it does |
 | :- | :- |
+| `build_intake` | The questions Claude asks first: what the build is for (campaign, mapping, bossing), how far to push (up to pinnacle bosses), one button or several, budget, Hardcore |
 | `list_classes` | Classes and released ascendancies |
 | `search_skills` | Skills by tags/types/weapon, with where each comes from |
 | `gem_details` | Everything about one gem: tags, skill types, description, level 1/20 text, Spirit cost, recommended supports |
@@ -59,7 +60,8 @@ The first start downloads about 30 MB of game data to `%APPDATA%\poe2-build-find
 | `plan_passive_tree` | Cheapest path to the chosen passives, with the level to take each point |
 | `leveling_phases` | League-start phases (acts, interludes, maps) with levels, checkpoints and quest rewards |
 | `check_build` | Checks a plan at a character level: skill availability, attribute and Spirit needs, passive budget |
-| `evaluate_build` | Path of Building numbers (damage, kill times, hits survived, resists) and a viability verdict at a level, with budget/mid/high gear, anoints, instills, runes, free-Spirit amulet skills, flasks and weapon swap (Windows) |
+| `evaluate_build` | Path of Building numbers (damage, kill times, hits survived, resists) and a viability verdict at a level, checked honestly against the player's goal (on track / rough / not realistic yet, with options), with setup gaps (unused Spirit, no boss skill), budget/mid/high gear, anoints, instills, runes, free-Spirit amulet skills, flasks and weapon swap (Windows) |
+| `optimize_build` | Tries support swaps, notables, Spirit skills and anoints in Path of Building and keeps what adds damage without losing survivability |
 | `compare_builds` | Two to four variants calculated the same way, side by side, with which is best for clearing, bossing and survival |
 | `suggest_extras` | Spirit skills that fit and cost (and which a Lament/Portent/Absent Amulet grants free), jewels, flasks and charms (unique ones too), amulet anoints and helmet instills (Raven-Touched Shard), runes, soul cores and idols per slot, with costs |
 | `item_prices` | Live prices from the official Currency Exchange for currency, runes, soul cores, Liquid Emotions, omens and other stackables |
@@ -70,7 +72,7 @@ The first start downloads about 30 MB of game data to `%APPDATA%\poe2-build-find
 | `export_build` | Writes the build into the game's Build Planner (passives with levels, skills and supports, gear hints) |
 | `data_status` | Cached game data info |
 
-Path of Building calculations run inside the extension on Windows (see [docs/engine.md](docs/engine.md)); they use assumed budget gear and heuristic verdict bands, so treat them as estimates.
+Path of Building calculations run inside the extension on Windows (see [docs/engine.md](docs/engine.md)); they use assumed gear (budget, mid or high, matched to the player's budget in the end game, with resistances capped as players do in maps) and heuristic verdict bands, so treat them as estimates.
 
 Prices: stackable items (currency, runes, soul cores, Liquid Emotions, omens…) come from GGG's public Currency Exchange data. Uniques and rares aren't priced; `trade_links` gives trade site searches the player opens themselves (the tool never calls the trade site). For unique and rare prices, the player checks the link — or, if their Claude chat has a browser connection such as Claude in Chrome, Claude offers to look up a few prices in their own browser (only when they say yes). The tool itself has no price backend.
 

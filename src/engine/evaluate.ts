@@ -6,10 +6,21 @@ import type { DefenceStyle } from "../gear/priorities.js";
 import { gemLevelForCharacter } from "../skills/levels.js";
 import { completePassives } from "../tree/complete.js";
 import type { PassiveTree } from "../tree/tree.js";
-import { assumeGear, assumeJewel, JEWEL_FOR_ATTRIBUTE, mainAttribute, type AssumedItem, type GearTier } from "./gear.js";
-import { applyItemExtras, type ItemExtras } from "./itemExtras.js";
+import { goalCheck, setupGaps, type GoalCheck, type Goals } from "../build/goals.js";
+import { findGem } from "../skills/skills.js";
+import {
+  assumeGear,
+  assumeJewel,
+  JEWEL_FOR_ATTRIBUTE,
+  mainAttribute,
+  RESISTANCE_TOP_UP,
+  resistanceRoll,
+  type AssumedItem,
+  type GearTier,
+} from "./gear.js";
+import { applyItemExtras, type EngineItem, type ItemExtras } from "./itemExtras.js";
 import type { PobEngine } from "./pob.js";
-import { verdict, type Verdict } from "./verdict.js";
+import { verdict, type Content, type Verdict } from "./verdict.js";
 
 /** A specific item: a unique by name, or pasted item text. Replaces the assumed item in its slot. */
 export interface ItemChoice {
@@ -40,6 +51,8 @@ export interface EvaluateInput {
   tree?: PassiveTree;
   /** Anoint, helmet instill, socketables, free-Spirit amulet skill, flasks, weapon swap. */
   extras?: ItemExtras;
+  /** What the player wants from the build: stricter targets, an honest goal check. */
+  goals?: Goals;
 }
 
 interface PobResult {
@@ -103,8 +116,12 @@ export interface Evaluation {
     /** Biggest single hit you survive (the second-weakest damage type). */
     maxHit?: number;
   };
-  /** Campaign levels get one verdict; level 65+ gets early maps, T15 and juiced T16. */
+  /** Campaign levels get one verdict; level 65+ gets early maps, T15 and juiced T16 (and pinnacle bosses if that's the goal). */
   verdicts: Verdict[];
+  /** With goals: an honest check against what the player wants, with options if it falls short. */
+  goalCheck?: GoalCheck;
+  /** Gaps in the skill setup: unused Spirit, no boss skill, no curse/mark/warcry/banner. */
+  setupGaps: string[];
   resources: { mana?: number; manaUnreserved?: number; spirit?: number; spiritUnreserved?: number };
   attributes: {
     str?: number;
@@ -158,7 +175,8 @@ function slotFor(data: GameData, item: ItemChoice, taken: Set<string>): string |
   return options.find((s) => !taken.has(s)) ?? options[0];
 }
 
-export async function evaluateBuild(engine: PobEngine, data: GameData, input: EvaluateInput): Promise<Evaluation> {
+/** `timeoutMs` per Path of Building calculation (a stuck engine is restarted). */
+export async function evaluateBuild(engine: PobEngine, data: GameData, input: EvaluateInput, timeoutMs = 60_000): Promise<Evaluation> {
   const level = input.level;
   const gemLevel = gemLevelForCharacter(level);
   const quality = input.quality ?? (level >= 65 ? 20 : 0);
@@ -254,7 +272,7 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
   const flexibleKeys = input.tree ? passives.filter((k) => input.tree!.nodes.get(k)?.isGenericAttribute) : [];
   const flexible = { str: 0, dex: 0, int: 0 };
   let attributes: Record<string, number> = {};
-  let clearRun = await engine.request<PobResult>("evaluate", params("None", attributes));
+  let clearRun = await engine.request<PobResult>("evaluate", params("None", attributes), timeoutMs);
   if (flexibleKeys.length) {
     const s0 = clearRun.stats;
     const missing = {
@@ -280,10 +298,19 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
       flexible[mainAttr]++;
     }
     attributes = { ...attributes };
-    clearRun = await engine.request<PobResult>("evaluate", params("None", attributes));
+    clearRun = await engine.request<PobResult>("evaluate", params("None", attributes), timeoutMs);
+  }
+
+  // In maps players cap their resistances; top up the assumed rares (not chosen items) to do the same.
+  if (input.gear.kind === "budget" && level >= 65) {
+    const added = topUpResistances(data, items, clearRun.stats, level, input.gear.tier);
+    if (added.length) {
+      clearRun = await engine.request<PobResult>("evaluate", params("None", attributes), timeoutMs);
+      notes.push(`Added resistance mods to the assumed gear to cap resistances, as players do in maps: ${added.join(", ")}.`);
+    }
   }
   const bossTier = level >= 65 ? "Pinnacle" : "Boss";
-  const bossRun = await engine.request<PobResult>("evaluate", params(bossTier, attributes));
+  const bossRun = await engine.request<PobResult>("evaluate", params(bossTier, attributes), timeoutMs);
 
   const scenario = (run: PobResult, enemy: Scenario["enemy"]): Scenario => {
     const s = run.stats;
@@ -334,17 +361,37 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
   const hitsFromNormal = s.TotalNumberOfHits === undefined ? undefined : Math.round(s.TotalNumberOfHits * 10) / 10;
   const hitsFromBoss = bossRun.stats.TotalNumberOfHits === undefined ? undefined : Math.round(bossRun.stats.TotalNumberOfHits * 10) / 10;
   const missingResistance = { fire: s.MissingFireResist, cold: s.MissingColdResist, lightning: s.MissingLightningResist };
-  const contents = level >= 65 ? (["early maps", "T15", "T16 juiced"] as const) : (["campaign"] as const);
-  const verdicts = contents.map((content) =>
-    verdict({
-      content,
-      rareSeconds: clear.secondsToKill.rare,
-      bossSeconds: boss.secondsToKill.boss,
-      normalHits: hitsFromNormal,
-      bossHits: hitsFromBoss,
-      missingResistance,
-    }),
-  );
+  const contents: Content[] =
+    level >= 65 ? ["early maps", "T15", "T16 juiced", ...(input.goals?.push === "pinnacle" ? (["pinnacle"] as const) : [])] : ["campaign"];
+  const numbers = {
+    rareSeconds: clear.secondsToKill.rare,
+    bossSeconds: boss.secondsToKill.boss,
+    normalHits: hitsFromNormal,
+    bossHits: hitsFromBoss,
+    missingResistance,
+  };
+  const verdicts = contents.map((content) => verdict({ ...numbers, content }, input.goals));
+  const spirit = round(s.Spirit);
+  const spiritUnreserved =
+    s.SpiritUnreserved === undefined
+      ? undefined
+      : // Path of Building sometimes still reserves Spirit for a free amulet skill; give back only
+        // what it actually reserved, never more than the total.
+        Math.round(s.SpiritUnreserved + Math.min(extrasResult.spiritRefund, Math.max(0, (s.Spirit ?? 0) - s.SpiritUnreserved)));
+  const amuletGem = (() => {
+    try {
+      return input.extras?.amuletSkill ? findGem(data, input.extras.amuletSkill) : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  const gaps = setupGaps({
+    skills: [...input.skills.map((x) => x.gem), ...(amuletGem ? [amuletGem] : []), ...(input.extras?.weaponSwap?.skills ?? []).map((x) => x.gem)],
+    spirit,
+    spiritUnreserved,
+    buttons: input.goals?.buttons,
+    purpose: input.goals?.purpose,
+  });
 
   return {
     level,
@@ -364,24 +411,44 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
     },
     survival: { hitsFromNormal, hitsFromBoss, maxHit: round(s.SecondMinimalMaximumHitTaken) },
     verdicts,
-    resources: {
-      mana: round(s.Mana),
-      manaUnreserved: round(s.ManaUnreserved),
-      spirit: round(s.Spirit),
-      // Path of Building sometimes still reserves Spirit for a free amulet skill; give back only
-      // what it actually reserved, never more than the total.
-      spiritUnreserved:
-        s.SpiritUnreserved === undefined
-          ? undefined
-          : Math.round(s.SpiritUnreserved + Math.min(extrasResult.spiritRefund, Math.max(0, (s.Spirit ?? 0) - s.SpiritUnreserved))),
-    },
+    goalCheck: input.goals ? goalCheck(numbers, level, input.goals) : undefined,
+    setupGaps: gaps,
+    resources: { mana: round(s.Mana), manaUnreserved: round(s.ManaUnreserved), spirit, spiritUnreserved },
     attributes: { str: s.Str, dex: s.Dex, int: s.Int, required: { str: s.ReqStr, dex: s.ReqDex, int: s.ReqInt }, flexibleNodes: flexible },
     passives: { allocated: clearRun.allocatedPassives, addedToConnect, unreachable },
     skillGroups: clearRun.skills.map((g) => g.label ?? g.gems.map((x) => x.name).join(" + ")),
-    assumedGear: remainingAssumed
-      .filter((a) => items.some((i) => i.slot === a.slot && i.raw === a.raw))
-      .map(({ slot, base, mods }) => ({ slot: slot.startsWith("Jewel ") ? "Jewel socket" : slot, base, mods })),
+    assumedGear: remainingAssumed.flatMap(({ slot, base, mods, raw }) => {
+      // Still in use (not replaced by an extra), possibly with resistance mods topped up.
+      const item = items.find((i) => i.slot === slot && i.raw?.startsWith(raw));
+      if (!item) return [];
+      const topUp = item.raw!.slice(raw.length).split("\n").filter(Boolean);
+      return [{ slot: slot.startsWith("Jewel ") ? "Jewel socket" : slot, base, mods: [...mods, ...topUp] }];
+    }),
     itemsUsed,
     notes,
   };
+}
+
+/**
+ * Add single-element resistance mods to assumed rares until resistances are capped (or the
+ * assumed slots run out, at most two extra mods per item). Returns what was added.
+ */
+function topUpResistances(data: GameData, items: EngineItem[], stats: Record<string, number>, level: number, tier?: GearTier): string[] {
+  const added: string[] = [];
+  const extraPerItem = new Map<EngineItem, number>();
+  for (const element of ["Fire", "Cold", "Lightning"] as const) {
+    let missing = stats[`Missing${element}Resist`] ?? 0;
+    for (const [slot, itemClass] of RESISTANCE_TOP_UP) {
+      if (missing <= 0) break;
+      const item = items.find((i) => i.slot === slot && i.raw?.startsWith("Rarity: RARE\nAssumed"));
+      if (!item || (extraPerItem.get(item) ?? 0) >= 2 || new RegExp(`% to ${element} Resistance`).test(item.raw!)) continue;
+      const value = resistanceRoll(data, itemClass, element, level, tier);
+      if (!value) continue;
+      item.raw += `\n+${value}% to ${element} Resistance`;
+      extraPerItem.set(item, (extraPerItem.get(item) ?? 0) + 1);
+      missing -= value;
+      added.push(`+${value}% ${element} (${slot})`);
+    }
+  }
+  return added;
 }

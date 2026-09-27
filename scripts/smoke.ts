@@ -84,6 +84,30 @@ await call("evaluate_build", {
   amuletSkill: "Herald of Ash",
   weaponSwap: { weapons: ["Bow"], skills: [{ gemId: "Lightning Arrow" }] },
 });
+await call("build_intake");
+const goalEval = JSON.parse(
+  await call("evaluate_build", {
+    class: "Infernalist",
+    level: 90,
+    passives: [],
+    skills: [{ gemId: "Fireball" }],
+    terms: ["fire", "spell"],
+    goals: { purpose: "bossing", push: "pinnacle", buttons: "few", budget: "modest" },
+  }),
+);
+if (goalEval.available && !goalEval.goalCheck?.status) process.exitCode = 1;
+const optimized = JSON.parse(
+  await call("optimize_build", {
+    class: "Infernalist",
+    level: 70,
+    passives: [],
+    skills: [{ gemId: "Fireball" }],
+    terms: ["fire", "spell"],
+    goals: { purpose: "mapping", push: "T15" },
+    maxEvaluations: 8,
+  }),
+);
+if (optimized.available && optimized.objective !== "clear") process.exitCode = 1;
 await call("item_prices", { names: ["Divine Orb", "Desert Rune", "Raven-Touched Shard"] });
 await call("trade_links", { rares: [{ slot: "Helmet", mods: ["+80 to maximum Life", "+30% to Fire Resistance"], maxLevel: 65 }], uniques: ["Mageblood"] });
 const comparison = JSON.parse(
@@ -112,8 +136,9 @@ await call("create_build_guide", {
   passivePlan: plan.passives.map((p: { id: string; takeAtLevel: number }) => ({ id: p.id, level: p.takeAtLevel })),
   phases: [
     { name: "Act 1", levels: [1, 15], skills: [{ gemId: "Fireball" }] },
-    { name: "Maps", levels: [65, 90], skills: [{ gemId: "Fireball", supports: [{ gemId: "Fiery Death" }] }] },
+    { name: "Maps", levels: [65, 90], skills: [{ gemId: "Fireball", supports: [{ gemId: "Fiery Death" }] }, { gemId: "Herald of Ash" }] },
   ],
+  goals: { purpose: "bossing", push: "pinnacle", buttons: "few", budget: "modest" },
   open: false,
 });
 const files = readdirSync(exportDir);

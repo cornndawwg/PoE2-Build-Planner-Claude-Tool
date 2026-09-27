@@ -141,6 +141,26 @@ export interface GearRequest {
   tier?: GearTier;
 }
 
+/** The value of a single-element resistance mod on an item class at an item level and gear tier. */
+export function resistanceRoll(data: GameData, itemClass: string, element: "Fire" | "Cold" | "Lightning", itemLevel: number, tier: GearTier = "budget"): number | undefined {
+  const family = modFamilies(data, [itemClass]).find((f) => termPattern(`${element} Resistance`).test(f.bestTier) && !/all Elemental|and/i.test(f.bestTier));
+  const advice = family && adviseFor(family, Math.max(1, Math.min(itemLevel, 82)));
+  const value = advice && /(\d+)%/.exec(rollAt(advice.tier, TIER[tier].roll).join(" "))?.[1];
+  return value ? Number(value) : undefined;
+}
+
+/** Slots that take an extra resistance mod when topping up resistances, in order. */
+export const RESISTANCE_TOP_UP: [slot: string, itemClass: string][] = [
+  ["Ring 1", "Ring"],
+  ["Ring 2", "Ring"],
+  ["Belt", "Belt"],
+  ["Boots", "Boots"],
+  ["Gloves", "Gloves"],
+  ["Helmet", "Helmet"],
+  ["Amulet", "Amulet"],
+  ["Body Armour", "Body Armour"],
+];
+
 export function assumeGear(data: GameData, req: GearRequest): AssumedItem[] {
   const itemLevel = Math.max(1, Math.min(req.level, 82));
   const tier = TIER[req.tier ?? "budget"];
