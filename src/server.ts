@@ -10,7 +10,8 @@ import { loadGameData, type GameData, type PlayableClass } from "./data/gamedata
 import { buildFileName, findBuildPlannerDir, INVENTORY_IDS, toBuildFile, writeBuildFile } from "./export/buildFile.js";
 import { DEFENCE_STYLES, SLOT_CLASSES, statPriorities } from "./gear/priorities.js";
 import { findUniques } from "./gear/uniques.js";
-import { compatibleSupports, searchSkills } from "./skills/skills.js";
+import { checkBuild } from "./build/checks.js";
+import { compatibleSupports, findGem, searchSkills } from "./skills/skills.js";
 import { findScaling } from "./tree/scaling.js";
 import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, withLevels } from "./tree/tree.js";
 
@@ -27,7 +28,7 @@ How to help the player:
 - Defences are a baseline every build needs; keep that advice short and focus on what makes their idea work.
 - Verdicts and numbers are estimates, not guarantees.
 
-Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → stat_priorities → find_uniques → export_build (ask the player first).
+Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → stat_priorities → find_uniques → export_build (ask the player first).
 
 This tool isn't affiliated with or endorsed by Grinding Gear Games in any way.`;
 
@@ -135,6 +136,7 @@ server.registerTool(
       prefer: z.array(z.string()).optional().describe("Raise ranking, e.g. [\"projectile\", \"area\"]"),
       weapon: z.string().optional().describe("Only skills usable with this weapon, e.g. \"bow\", \"mace\""),
       includeItemSkills: z.boolean().optional().describe("Also include skills granted by items (weapon bases, uniques)"),
+      availableBy: z.number().int().min(1).max(100).optional().describe("Only skills usable by this character level (for leveling)"),
       limit: z.number().int().min(1).max(100).optional(),
     },
     annotations: { readOnlyHint: true },
@@ -233,6 +235,10 @@ server.registerTool(
       pointsUsed: plan.nodes.length,
       pointsAvailableAtTargetLevel: budget,
       spareForDefenceAndAttributes: budget - plan.nodes.length,
+      warning:
+        plan.nodes.length > budget
+          ? `Over budget: needs ${plan.nodes.length} points but a level ${level} character has ${budget}. Drop or swap some targets.`
+          : undefined,
       unreachable: plan.unreachable.map((k) => tree.describe(k).name || k),
       passives: withLevels(plan, data.questPoints).map(({ key, id, name, kind, stats, level: at, forTarget }) => ({
         takeAtLevel: at,
@@ -311,6 +317,48 @@ server.registerTool(
     run(async () => {
       const { data } = await gameData();
       return json(findUniques(data, args));
+    }),
+);
+
+server.registerTool(
+  "check_build",
+  {
+    title: "Check a build at a character level",
+    description:
+      "Rule-based checks for a planned build at a given character level: which skills are usable yet (and from what level), " +
+      "gem attribute requirements vs Strength/Dexterity/Intelligence from the class, passives and gear (and how to spend " +
+      "\"+5 to any Attribute\" passives), Spirit for persistent skills vs Spirit from quests, passives and gear, and the passive " +
+      "point budget. Run it for each leveling phase (e.g. levels 12, 28, 45, 65, 90). No damage numbers yet.",
+    inputSchema: {
+      class: z.string().describe("Class or ascendancy name"),
+      ascendancy: z.string().optional(),
+      characterLevel: z.number().int().min(1).max(100),
+      passives: z.array(z.string()).describe("Main-tree passives taken by this level (key, id or exact name)"),
+      ascendancyPassives: z.array(z.string()).optional(),
+      skills: z.array(z.object({ gemId: z.string().describe("gemId or exact name"), supports: z.array(z.string()).optional() })),
+      gearAttributes: z
+        .object({ str: z.number().optional(), dex: z.number().optional(), int: z.number().optional() })
+        .optional()
+        .describe("Attributes expected from gear, if known"),
+      gearSpirit: z.number().int().min(0).optional().describe("Spirit from gear, if known (e.g. a sceptre)"),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) =>
+    run(async () => {
+      const { data, tree } = await gameData();
+      const { cls } = findClass(data, args.class, args.ascendancy);
+      return json(
+        checkBuild(data, data.nodes, {
+          cls,
+          characterLevel: args.characterLevel,
+          passives: args.passives.map((p) => resolveNode(tree, p)),
+          ascendancyPassives: args.ascendancyPassives?.map((p) => resolveNode(tree, p)),
+          skills: args.skills.map((s) => ({ gem: findGem(data, s.gemId), supports: s.supports?.map((id) => findGem(data, id)) })),
+          gearAttributes: args.gearAttributes,
+          gearSpirit: args.gearSpirit,
+        }),
+      );
     }),
 );
 

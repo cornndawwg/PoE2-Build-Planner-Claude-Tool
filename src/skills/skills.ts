@@ -1,6 +1,7 @@
 import type { GameData, GemSource, PlayerGem } from "../data/gamedata.js";
 import type { Skill } from "../data/types.js";
 import { stripMarkup } from "../text.js";
+import { availableFromLevel } from "./levels.js";
 import { matchesTypeExpression } from "./typeExpression.js";
 
 export interface SkillMatch {
@@ -10,6 +11,8 @@ export interface SkillMatch {
   source: GemSource;
   tier: number;
   weaponRequirements: string[];
+  /** Earliest character level it can be used (skills from uncut gems only). */
+  availableFromLevel?: number;
   tags: string[];
   skillTypes: string[];
   description: string;
@@ -42,6 +45,8 @@ export interface SkillSearchQuery {
   kinds?: PlayerGem["kind"][];
   /** Include skills granted by items (weapon bases, uniques). Default false. */
   includeItemSkills?: boolean;
+  /** Only skills a character of this level can already use. */
+  availableBy?: number;
   limit?: number;
 }
 
@@ -104,6 +109,8 @@ export function searchSkills(data: GameData, query: SkillSearchQuery): SkillMatc
     if (!kinds.includes(gem.kind)) continue;
     if (gem.source === "item" && !query.includeItemSkills) continue;
     if (query.weapon && !usableWith(gem, query.weapon)) continue;
+    const from = availableFromLevel(gem);
+    if (query.availableBy !== undefined && from !== undefined && from > query.availableBy) continue;
     const skill = skillOf(data, gem);
     const terms = searchTerms(gem, skill);
     if (!require.every((t) => terms.has(t))) continue;
@@ -115,6 +122,7 @@ export function searchSkills(data: GameData, query: SkillSearchQuery): SkillMatc
       source: gem.source,
       tier: gem.tier,
       weaponRequirements: gem.weaponRequirements,
+      availableFromLevel: from,
       tags: gem.tags,
       skillTypes: skill?.active_skill?.types ?? [],
       description: stripMarkup(skill?.active_skill?.description ?? ""),

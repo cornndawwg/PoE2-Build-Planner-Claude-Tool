@@ -76,6 +76,8 @@ export interface SkillGem {
 export interface Skill {
   is_support: boolean;
   cast_time?: number;
+  /** e.g. { reservations: { spirit: 30 } } for persistent skills. */
+  static?: { reservations?: { spirit?: number } };
   active_skill?: {
     id: string;
     display_name: string;

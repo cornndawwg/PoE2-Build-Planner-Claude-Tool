@@ -64,6 +64,8 @@ export interface GameData {
   uniques: (UniqueItem & { itemClass?: string })[];
   /** Quests that grant passive points, with the area level they're done at. */
   questPoints: { areaLevel: number; points: number; quest: string }[];
+  /** Quests that grant Spirit (e.g. "+30 to Spirit"), with the area level they're done at. */
+  questSpirit: { areaLevel: number; spirit: number; quest: string }[];
 }
 
 interface PobQuestReward {
@@ -71,6 +73,7 @@ interface PobQuestReward {
   Area?: string;
   Info?: string;
   AreaLevel: number;
+  Stat?: string;
   questPoints?: number;
 }
 
@@ -186,6 +189,12 @@ export async function loadGameData(cacheDir: string = defaultCacheDir()): Promis
     questPoints: quests
       .filter((q) => (q.questPoints ?? 0) > 0)
       .map((q) => ({ areaLevel: q.AreaLevel, points: q.questPoints!, quest: `Act ${q.Act}: ${q.Info ?? q.Area ?? ""}` }))
+      .sort((a, b) => a.areaLevel - b.areaLevel),
+    questSpirit: quests
+      .flatMap((q) => {
+        const m = /^\+(\d+) to Spirit$/.exec(q.Stat ?? "");
+        return m ? [{ areaLevel: q.AreaLevel, spirit: Number(m[1]), quest: `Act ${q.Act}: ${q.Info ?? q.Area ?? ""}` }] : [];
+      })
       .sort((a, b) => a.areaLevel - b.areaLevel),
   };
 }

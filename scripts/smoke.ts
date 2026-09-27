@@ -43,6 +43,12 @@ const asc = passives.filter((p: { kind: string }) => p.kind === "ascendancy-nota
 const plan = JSON.parse(await call("plan_passive_tree", { class: "Witch", ascendancy: "Infernalist", passives: main, ascendancyPassives: asc }));
 await call("stat_priorities", { terms: ["fire", "spell", "cast speed"], avoid: ["attack"], slots: ["Amulet", "Helmet", "Jewel"], perSlot: 3, defence: ["energy shield"], itemLevel: 30 });
 
+await call("check_build", {
+  class: "Infernalist",
+  characterLevel: 28,
+  passives: plan.passives.map((p: { id: string }) => p.id),
+  skills: [{ gemId: "Fireball", supports: ["Fiery Death"] }, { gemId: "Herald of Ash" }],
+});
 await call("find_uniques", { terms: ["fire", "spell"], slots: ["Amulet", "Wand"], limit: 3 });
 await call("export_build", {
   name: "Smoke Test Fireball",
