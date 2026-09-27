@@ -1,0 +1,83 @@
+name: PoB engine
+
+# Builds LuaJIT and lua-utf8 from pinned sources, checks out a pinned Path of Building PoE2
+# (without art), and runs it headless to prove the calculation engine works on Windows.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "pob/**"
+      - ".github/workflows/pob-engine.yml"
+
+permissions:
+  contents: read
+
+env:
+  # LuaJIT v2.1 at the commit Path of Building itself pins; it supports PoB's newer syntax.
+  LUAJIT_COMMIT: 2460b3ff93a1c955de3d62cfc825de7d68dc272e
+  LUAUTF8_COMMIT: d65ebfa4a00d6e582970ab729013bb2a629e74c9
+  # Path of Building PoE2 dev with 0.5.5 game data.
+  POB_COMMIT: ce566eac45ea8a86477f513c7ee65a1ebe60014e
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: git make mingw-w64-ucrt-x86_64-gcc
+
+      - name: Build LuaJIT and lua-utf8
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/LuaJIT/LuaJIT lj
+          git -C lj checkout "$LUAJIT_COMMIT"
+          make -C lj -j4
+          git clone --filter=blob:none https://github.com/starwing/luautf8 lu
+          git -C lu checkout "$LUAUTF8_COMMIT"
+          gcc -O2 -shared -static-libgcc -DLUA_BUILD_AS_DLL -Ilj/src lu/lutf8lib.c lj/src/lua51.dll -o lua-utf8.dll
+          mkdir -p runtime
+          cp lj/src/luajit.exe lj/src/lua51.dll lua-utf8.dll runtime/
+          ./runtime/luajit.exe -v
+
+      - name: Check out Path of Building (no art)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config --global core.autocrlf false
+          git clone --filter=blob:none --no-checkout https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2 pob-src
+          git -C pob-src sparse-checkout set --no-cone '/src/' '/runtime/lua/' '/manifest.xml' '/LICENSE.md' '!*.zst' '!*.png' '!*.jpg' '!*.dds' '!*.webp'
+          git -C pob-src checkout "$POB_COMMIT"
+          du -sh pob-src/src pob-src/runtime/lua
+
+      - name: Run PoB headless self-test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd pob-src/src
+          "$GITHUB_WORKSPACE/runtime/luajit.exe" "$GITHUB_WORKSPACE/pob/host.lua" selftest > "$GITHUB_WORKSPACE/selftest.json" 2> "$GITHUB_WORKSPACE/selftest.log" || true
+          echo "--- stdout (JSON)"; cat "$GITHUB_WORKSPACE/selftest.json"
+          echo "--- last 60 lines of stderr"; tail -n 60 "$GITHUB_WORKSPACE/selftest.log"
+          node -e "
+            const r = JSON.parse(require('fs').readFileSync(process.env.GITHUB_WORKSPACE + '/selftest.json', 'utf8').trim().split(/\r?\n/).pop());
+            const failed = r.steps.filter(s => !s.ok);
+            if (failed.length || !r.stats || !r.stats.Life) { console.error('Self-test failed:', JSON.stringify(failed)); process.exit(1); }
+            console.log('Self-test OK:', JSON.stringify(r.stats));
+          "
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pob-engine-windows
+          path: |
+            runtime/
+            selftest.json
+            selftest.log
+          if-no-files-found: warn
