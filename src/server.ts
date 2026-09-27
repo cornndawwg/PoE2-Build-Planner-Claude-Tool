@@ -19,7 +19,7 @@ import { compatibleSupports, findGem, searchSkills } from "./skills/skills.js";
 import { findScaling } from "./tree/scaling.js";
 import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, withLevels } from "./tree/tree.js";
 
-const VERSION = "0.0.4";
+const VERSION = "0.1.0";
 const log = (message: string) => process.stderr.write(`[poe2-build-planner] ${message}\n`);
 
 const INSTRUCTIONS = `Tools for planning Path of Exile 2 builds (game version 0.5) for casual players.

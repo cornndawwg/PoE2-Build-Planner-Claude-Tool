@@ -10,7 +10,7 @@ Built for casual players on a budget, not meta-chasers.
 
 - Runs locally on your PC as an MCP server inside the Claude desktop app.
 - Downloads public game data on first run: GGG's passive tree export, RePoE and Path of Building data. Nothing from the game data is shipped with this tool.
-- Uses Path of Building's calculation engine for damage and defence numbers.
+- Uses Path of Building's calculation engine for damage and defence numbers (bundled; Windows only for now).
 - Viability verdicts are **estimates**, not guarantees.
 
 ## Install (players)
@@ -58,13 +58,14 @@ The first start downloads about 30 MB of game data to `%APPDATA%\poe2-build-find
 | `plan_passive_tree` | Cheapest path to the chosen passives, with the level to take each point |
 | `leveling_phases` | League-start phases (acts, interludes, maps) with levels, checkpoints and quest rewards |
 | `check_build` | Checks a plan at a character level: skill availability, attribute and Spirit needs, passive budget |
+| `evaluate_build` | Path of Building numbers (damage, kill times, hits survived, resists) and a viability verdict at a level (Windows) |
 | `stat_priorities` | Offensive mods to look for per gear slot and on jewels, plus a defence baseline |
 | `find_uniques` | Uniques that fit the build, with current mods, level and where they drop (no prices — see below) |
 | `create_build_guide` | Writes a Maxroll-style guide page (phases, checks, quest rewards, highlighted passive tree, a Build Planner file per phase) and opens it |
 | `export_build` | Writes the build into the game's Build Planner (passives with levels, skills and supports, gear hints) |
 | `data_status` | Cached game data info |
 
-Not yet: Path of Building calculations and viability verdicts.
+Path of Building calculations run inside the extension on Windows (see [docs/engine.md](docs/engine.md)); they use assumed budget gear and heuristic verdict bands, so treat them as estimates.
 
 No unique prices: poe.ninja's API terms ask desktop apps to go through their own backend rather than calling it from players' machines, and this tool deliberately has no backend.
 
@@ -77,6 +78,9 @@ No unique prices: poe.ninja's API terms ask desktop apps to go through their own
 - [Path of Building Community (PoE2)](https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2) — calculation engine and data (MIT)
 
 ## License
+
+Bundled third-party software: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 
 MIT — see [LICENSE](LICENSE). Game data is downloaded at runtime and belongs to Grinding Gear Games.
 

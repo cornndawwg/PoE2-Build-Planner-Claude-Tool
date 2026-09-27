@@ -1,10 +1,12 @@
 name: PoB engine
 
 # Builds LuaJIT and lua-utf8 from pinned sources, checks out a pinned Path of Building PoE2
-# (without art), and runs it headless to prove the calculation engine works on Windows.
+# (without art), runs it headless as a self-test, and uploads the engine/ folder that the
+# extension bundle ships.
 
 on:
   workflow_dispatch:
+  workflow_call:
   push:
     paths:
       - "pob/**"
@@ -43,9 +45,11 @@ jobs:
           git clone --filter=blob:none https://github.com/starwing/luautf8 lu
           git -C lu checkout "$LUAUTF8_COMMIT"
           gcc -O2 -shared -static-libgcc -DLUA_BUILD_AS_DLL -Ilj/src lu/lutf8lib.c lj/src/lua51.dll -o lua-utf8.dll
-          mkdir -p runtime
-          cp lj/src/luajit.exe lj/src/lua51.dll lua-utf8.dll runtime/
-          ./runtime/luajit.exe -v
+          mkdir -p engine/runtime engine/licenses
+          cp lj/src/luajit.exe lj/src/lua51.dll lua-utf8.dll engine/runtime/
+          cp lj/COPYRIGHT engine/licenses/LuaJIT-COPYRIGHT.txt
+          cp lu/LICENSE engine/licenses/lua-utf8-LICENSE.txt 2>/dev/null || cp lu/README.md engine/licenses/lua-utf8-README.md
+          ./engine/runtime/luajit.exe -v
 
       - name: Check out Path of Building (no art)
         shell: bash
@@ -56,31 +60,44 @@ jobs:
           set -euo pipefail
           git config --global core.autocrlf false
           git clone --filter=blob:none --no-checkout https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2 pob-src
-          git -C pob-src sparse-checkout set --no-cone '/src/' '/runtime/lua/' '/manifest.xml' '/LICENSE.md' '!*.zst' '!*.png' '!*.jpg' '!*.dds' '!*.webp'
+          git -C pob-src sparse-checkout set --no-cone '/src/' '/runtime/lua/' '/LICENSE.md' '!*.zst' '!*.png' '!*.jpg' '!*.dds' '!*.webp' '!/src/Export/'
           git -C pob-src checkout "$POB_COMMIT"
-          du -sh pob-src/src pob-src/runtime/lua
+          mkdir -p engine/pob
+          cp -r pob-src/src engine/pob/src
+          mkdir -p engine/pob/runtime && cp -r pob-src/runtime/lua engine/pob/runtime/lua
+          cp pob-src/LICENSE.md engine/licenses/PathOfBuilding-LICENSE.md
+          cp pob/host.lua engine/host.lua
+          echo "$POB_COMMIT" > engine/pob/COMMIT
+          du -sh engine engine/pob/src
 
       - name: Run PoB headless self-test
         shell: bash
         run: |
           set -euo pipefail
-          cd pob-src/src
-          "$GITHUB_WORKSPACE/runtime/luajit.exe" "$GITHUB_WORKSPACE/pob/host.lua" selftest > "$GITHUB_WORKSPACE/selftest.json" 2> "$GITHUB_WORKSPACE/selftest.log" || true
-          echo "--- stdout (JSON)"; cat "$GITHUB_WORKSPACE/selftest.json"
-          echo "--- last 60 lines of stderr"; tail -n 60 "$GITHUB_WORKSPACE/selftest.log"
+          cd engine/pob/src
+          ../../runtime/luajit.exe ../../host.lua selftest > "$GITHUB_WORKSPACE/selftest.json" 2> "$GITHUB_WORKSPACE/selftest.log" || true
+          echo "--- stdout"; cat "$GITHUB_WORKSPACE/selftest.json"
+          echo "--- last 20 lines of stderr"; tail -n 20 "$GITHUB_WORKSPACE/selftest.log"
           node -e "
-            const r = JSON.parse(require('fs').readFileSync(process.env.GITHUB_WORKSPACE + '/selftest.json', 'utf8').trim().split(/\r?\n/).pop());
-            const failed = r.steps.filter(s => !s.ok);
-            if (failed.length || !r.stats || !r.stats.Life) { console.error('Self-test failed:', JSON.stringify(failed)); process.exit(1); }
-            console.log('Self-test OK:', JSON.stringify(r.stats));
+            const lines = require('fs').readFileSync(process.env.GITHUB_WORKSPACE + '/selftest.json', 'utf8').trim().split(/\r?\n/);
+            const r = JSON.parse(lines[lines.length - 1]);
+            if (!r.ok || !r.result || !r.result.stats || !(r.result.stats.Life > 0) || !(r.result.stats.TotalDPS > 0)) {
+              console.error('Self-test failed:', JSON.stringify(r)); process.exit(1);
+            }
+            console.log('Self-test OK:', JSON.stringify({ life: r.result.stats.Life, dps: r.result.stats.TotalDPS, startup: r.startupSeconds }));
           "
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-windows
+          path: engine/
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: pob-engine-windows
+          name: selftest-logs
           path: |
-            runtime/
             selftest.json
             selftest.log
           if-no-files-found: warn
