@@ -8,12 +8,14 @@ import { z } from "zod";
 import { defaultCacheDir, ensureData, readCachedManifest } from "./data/cache.js";
 import { loadGameData, type GameData, type PlayableClass } from "./data/gamedata.js";
 import { buildFileName, findBuildPlannerDir, INVENTORY_IDS, toBuildFile, writeBuildFile } from "./export/buildFile.js";
-import { DEFENCE_STYLES, SLOT_CLASSES, statPriorities } from "./gear/priorities.js";
+import { flaskSuggestions, jewelSuggestions, spiritSuggestions } from "./gear/extras.js";
+import { DEFENCE_STYLES, SLOT_CLASSES, statPriorities, type DefenceStyle } from "./gear/priorities.js";
 import { findUniques } from "./gear/uniques.js";
 import { checkBuild } from "./build/checks.js";
 import { validateSkills } from "./build/validate.js";
 import { levelingPhases } from "./build/phases.js";
-import { evaluateBuild } from "./engine/evaluate.js";
+import { compareBuilds } from "./engine/compare.js";
+import { evaluateBuild, type EvaluateInput } from "./engine/evaluate.js";
 import { findEngine, PobEngine } from "./engine/pob.js";
 import { createGuide } from "./guide/guide.js";
 import type { Skill } from "./data/types.js";
@@ -24,7 +26,7 @@ import { completePassives } from "./tree/complete.js";
 import { findScaling } from "./tree/scaling.js";
 import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, withLevels } from "./tree/tree.js";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 const log = (message: string) => process.stderr.write(`[poe2-build-planner] ${message}\n`);
 
 const INSTRUCTIONS = `Tools for planning Path of Exile 2 builds (game version 0.5) for casual players.
@@ -41,7 +43,9 @@ First ask: is this a league start (new character from level 1) or an existing ch
 
 League start: call leveling_phases and plan every phase, not just the end-game build. For each phase pick skills the character can use by then (search_skills with availableBy), supports, the passives to take during it, and gear to look for (stat_priorities with itemLevel ≈ the phase's levels). Run check_build at each phase's checkpointLevel and fix what it flags before moving on. If the final build is weak early, use a different leveling skill or setup and say when to switch. Mention useful quest rewards in each phase.
 
-Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → evaluate_build (real numbers and a verdict per phase) → stat_priorities → find_uniques → export_build (ask the player first) → create_build_guide to lay it all out as a web page (ask first; it opens in their browser). For a league start, export one Build Planner file per phase whose setup differs (e.g. "Name - 1 Acts 1-2", "Name - 2 Acts 3-4", "Name - 3 Maps"), so the player can switch plans in game.
+To weigh two options (weapon choice, ascendancy, a key unique), use compare_builds instead of guessing.
+
+Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → evaluate_build (real numbers and a verdict per phase) → stat_priorities → suggest_extras (Spirit skills, jewels, flasks, charms) → find_uniques → export_build (ask the player first) → create_build_guide to lay it all out as a web page (ask first; it opens in their browser). For a league start, export one Build Planner file per phase whose setup differs (e.g. "Name - 1 Acts 1-2", "Name - 2 Acts 3-4", "Name - 3 Maps"), so the player can switch plans in game.
 
 This tool isn't affiliated with or endorsed by Grinding Gear Games in any way.`;
 
@@ -349,6 +353,72 @@ server.registerTool(
   }),
 );
 
+/** One build to calculate; shared by evaluate_build and compare_builds. */
+const buildSpec = {
+  class: z.string().describe("Class or ascendancy name"),
+  ascendancy: z.string().optional(),
+  level: z.number().int().min(1).max(100),
+  passives: z.array(z.string()).describe("Main-tree passives taken by this level (key, id or exact name); missing connectors are added"),
+  ascendancyPassives: z.array(z.string()).optional(),
+  skills: z.array(z.object({ gemId: z.string().describe("gemId or exact name"), supports: z.array(z.string()).optional() })).min(1),
+  mainSkill: z.number().int().min(0).optional().describe("0-based index of the main damage skill (default 0)"),
+  terms: z.array(z.string()).optional().describe("What the build scales, for the assumed gear (as for stat_priorities)"),
+  avoid: z.array(z.string()).optional(),
+  defence: z.array(z.enum(DEFENCE_STYLES)).optional().describe("Defence layers for the assumed gear (default: life)"),
+  weapons: z.array(z.string()).optional().describe("Weapon item classes to assume, e.g. [\"Staff\"], [\"Wand\", \"Focus\"], [\"One Hand Mace\", \"Shield\"]"),
+  items: z
+    .array(
+      z.object({
+        unique: z.string().optional().describe("Exact unique name, e.g. \"Plaguefinger\""),
+        raw: z.string().optional().describe("Item text copied from the game (Ctrl+C)"),
+        slot: z
+          .string()
+          .optional()
+          .describe("Weapon 1, Weapon 2, Helmet, Body Armour, Gloves, Boots, Amulet, Ring 1, Ring 2, Belt or Jewel (usually worked out automatically)"),
+      }),
+    )
+    .optional()
+    .describe("Specific items; each replaces the assumed item in its slot. Jewels go in the tree's allocated jewel sockets."),
+  gear: z.enum(["budget", "none"]).optional(),
+};
+type BuildSpec = z.infer<z.ZodObject<typeof buildSpec>>;
+
+function toEvaluateInput(data: GameData, tree: PassiveTree, spec: BuildSpec) {
+  const { cls, asc } = findClass(data, spec.class, spec.ascendancy);
+  const skills = spec.skills.map((s) => ({ gem: findGem(data, s.gemId), supports: s.supports?.map((id) => findGem(data, id)) }));
+  const terms = spec.terms?.length
+    ? spec.terms
+    : skills[spec.mainSkill ?? 0]!.gem.tags.filter((t) => !["intelligence", "strength", "dexterity", "repeatable"].includes(t));
+  const passiveKeys = [...spec.passives, ...(spec.ascendancyPassives ?? [])].map((p) => resolveNode(tree, p));
+  const skillIssues = validateSkills(data, skills, passiveKeys.flatMap((k) => tree.nodes.get(k) ?? []));
+  const input: EvaluateInput = {
+    cls,
+    ascendancyName: asc?.name,
+    ascendancyId: asc?.id,
+    level: spec.level,
+    passives: passiveKeys,
+    skills,
+    mainSkill: spec.mainSkill,
+    items: spec.items,
+    tree,
+    gear:
+      spec.gear === "none"
+        ? { kind: "none" }
+        : { kind: "budget", terms, avoid: spec.avoid, defence: spec.defence?.length ? spec.defence : ["life"], weapons: spec.weapons },
+  };
+  return { input, skillIssues };
+}
+
+const engineUnavailable = () =>
+  json({
+    available: false,
+    reason:
+      process.platform === "win32"
+        ? "The Path of Building engine files aren't installed with this copy of the tool."
+        : "The Path of Building engine currently ships for Windows only.",
+    hint: "Use check_build for rule-based checks instead.",
+  });
+
 server.registerTool(
   "evaluate_build",
   {
@@ -359,73 +429,94 @@ server.registerTool(
       "life, energy shield, resistances (with the campaign's resistance penalty and only the quest rewards earned by that level), " +
       "Spirit and attributes, plus a verdict band (Comfortable / Workable / Borderline / Not yet) with the weak point and what to fix " +
       "first. Level 65+ is judged for early maps, T15 and juiced T16. Damage is broken down into hits, ignite, poison, bleed and " +
-      "minions. By default it assumes budget rare gear for that level (a few mid-roll mods per slot, based on `terms` and `defence`); " +
-      "pass `items` to use specific uniques (by name) or pasted item text in their slots, or `gear: \"none\"` for no gear. " +
-      "Missing connecting passives are filled in (and listed), and \"+5 to any Attribute\" passives are spent where the gems and " +
-      "weapon need them. Use it at each phase's checkpoint. Numbers are estimates: assumed gear and heuristic bands, not " +
-      "guarantees. Windows only for now.",
-    inputSchema: {
-      class: z.string().describe("Class or ascendancy name"),
-      ascendancy: z.string().optional(),
-      level: z.number().int().min(1).max(100),
-      passives: z.array(z.string()).describe("Main-tree passives taken by this level (key, id or exact name)"),
-      ascendancyPassives: z.array(z.string()).optional(),
-      skills: z.array(z.object({ gemId: z.string().describe("gemId or exact name"), supports: z.array(z.string()).optional() })).min(1),
-      mainSkill: z.number().int().min(0).optional().describe("0-based index of the main damage skill (default 0)"),
-      terms: z.array(z.string()).optional().describe("What the build scales, for the assumed gear (as for stat_priorities)"),
-      avoid: z.array(z.string()).optional(),
-      defence: z.array(z.enum(DEFENCE_STYLES)).optional().describe("Defence layers for the assumed gear (default: life)"),
-      weapons: z.array(z.string()).optional().describe("Weapon item classes to assume, e.g. [\"Staff\"] or [\"Wand\", \"Focus\"]"),
-      items: z
-        .array(
-          z.object({
-            unique: z.string().optional().describe("Exact unique name, e.g. \"Plaguefinger\""),
-            raw: z.string().optional().describe("Item text copied from the game (Ctrl+C)"),
-            slot: z.string().optional().describe("Weapon 1, Weapon 2, Helmet, Body Armour, Gloves, Boots, Amulet, Ring 1, Ring 2 or Belt (usually worked out automatically)"),
-          }),
-        )
-        .optional()
-        .describe("Specific items; each replaces the assumed item in its slot"),
-      gear: z.enum(["budget", "none"]).optional(),
-    },
+      "minions. By default it assumes budget rare gear for that level (a few mid-roll mods per slot, based on `terms` and `defence`), " +
+      "including a budget jewel in each allocated jewel socket; pass `items` to use specific uniques (by name) or pasted item text " +
+      "in their slots (jewels too), or `gear: \"none\"` for no gear. Missing connecting passives are filled in (and listed), and " +
+      "\"+5 to any Attribute\" passives are spent where the gems and weapon need them. To compare options side by side, use " +
+      "compare_builds. Numbers are estimates: assumed gear and heuristic bands, not guarantees. Windows only for now.",
+    inputSchema: buildSpec,
     annotations: { readOnlyHint: true },
   },
   async (args) =>
     run(async () => {
       const { data, tree } = await gameData();
       const engine = getEngine();
-      if (!engine) {
-        return json({
-          available: false,
-          reason:
-            process.platform === "win32"
-              ? "The Path of Building engine files aren't installed with this copy of the tool."
-              : "The Path of Building engine currently ships for Windows only.",
-          hint: "Use check_build for rule-based checks instead.",
-        });
-      }
-      const { cls, asc } = findClass(data, args.class, args.ascendancy);
-      const skills = args.skills.map((s) => ({ gem: findGem(data, s.gemId), supports: s.supports?.map((id) => findGem(data, id)) }));
-      const terms = args.terms?.length ? args.terms : skills[args.mainSkill ?? 0]!.gem.tags.filter((t) => !["intelligence", "strength", "dexterity", "repeatable"].includes(t));
-      const passiveKeys = [...args.passives, ...(args.ascendancyPassives ?? [])].map((p) => resolveNode(tree, p));
-      const allocated = passiveKeys.flatMap((k) => tree.nodes.get(k) ?? []);
-      const skillIssues = validateSkills(data, skills, allocated);
-      const evaluation = await evaluateBuild(engine, data, {
-        cls,
-        ascendancyName: asc?.name,
-        ascendancyId: asc?.id,
-        level: args.level,
-        passives: passiveKeys,
-        skills,
-        mainSkill: args.mainSkill,
-        items: args.items,
-        tree,
-        gear:
-          args.gear === "none"
-            ? { kind: "none" }
-            : { kind: "budget", terms, avoid: args.avoid, defence: args.defence?.length ? args.defence : ["life"], weapons: args.weapons },
-      });
+      if (!engine) return engineUnavailable();
+      const { input, skillIssues } = toEvaluateInput(data, tree, args);
+      const evaluation = await evaluateBuild(engine, data, input);
       return json({ available: true, skillIssues, ...evaluation });
+    }),
+);
+
+server.registerTool(
+  "compare_builds",
+  {
+    title: "Compare build options side by side",
+    description:
+      "Calculate 2–4 variants of a build the same way and compare them: e.g. two-handed vs one-handed + shield Titan, two " +
+      "ascendancies for the same theme, or a build with and without a key unique. Each variant is a full build (same fields as " +
+      "evaluate_build) with a label; usually they share most fields and differ in weapons, items, passives, skills or ascendancy. " +
+      "Returns damage, kill times, survival, life/ES, resistances, attribute shortfalls and verdicts per variant, the change " +
+      "against the first variant, and which is best for clearing, bossing and survival. Windows only for now.",
+    inputSchema: {
+      variants: z.array(z.object({ label: z.string(), ...buildSpec })).min(2).max(4),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ variants }) =>
+    run(async () => {
+      const { data, tree } = await gameData();
+      const engine = getEngine();
+      if (!engine) return engineUnavailable();
+      const prepared = variants.map((v) => ({ label: v.label, ...toEvaluateInput(data, tree, v) }));
+      const comparison = await compareBuilds(engine, data, prepared.map(({ label, input }) => ({ label, input })));
+      return json({
+        available: true,
+        ...comparison,
+        skillIssues: Object.fromEntries(prepared.filter((p) => p.skillIssues.length).map((p) => [p.label, p.skillIssues])),
+      });
+    }),
+);
+
+server.registerTool(
+  "suggest_extras",
+  {
+    title: "Suggest Spirit skills, jewels, flasks and charms",
+    description:
+      "Suggestions beyond the main skill at a character level: persistent skills (auras, heralds, buffs) that fit the build and " +
+      "what they cost against the Spirit available by then (quests plus any gear Spirit you give), with a pick that fits; the best " +
+      "jewel type and its mods for the build, plus fitting unique jewels; and the best life and mana flask for the level, useful " +
+      "flask mods, and charms (with what triggers them).",
+    inputSchema: {
+      level: z.number().int().min(1).max(100),
+      terms: z.array(z.string()).min(1).describe("What the build scales, e.g. [\"fire\", \"spell\", \"ignite\"]"),
+      avoid: z.array(z.string()).optional(),
+      defence: z.array(z.enum(DEFENCE_STYLES)).optional().describe("Default: life"),
+      mainSkill: z.string().optional().describe("Main skill name (for the jewel type)"),
+      gearSpirit: z.number().int().min(0).optional().describe("Spirit from gear, if any"),
+      alreadyUsing: z.array(z.string()).optional().describe("Spirit skills already in the build"),
+      only: z.array(z.enum(["spirit", "jewels", "flasks"])).optional().describe("Default: all three"),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) =>
+    run(async () => {
+      const { data } = await gameData();
+      const query = {
+        level: args.level,
+        terms: args.terms,
+        avoid: args.avoid,
+        defence: args.defence?.length ? args.defence : (["life"] as DefenceStyle[]),
+        mainSkill: args.mainSkill ? findGem(data, args.mainSkill) : undefined,
+        gearSpirit: args.gearSpirit,
+        alreadyUsing: args.alreadyUsing,
+      };
+      const want = new Set(args.only?.length ? args.only : ["spirit", "jewels", "flasks"]);
+      return json({
+        spirit: want.has("spirit") ? spiritSuggestions(data, query) : undefined,
+        jewels: want.has("jewels") ? jewelSuggestions(data, query) : undefined,
+        flasksAndCharms: want.has("flasks") ? flaskSuggestions(data, query) : undefined,
+      });
     }),
 );
 

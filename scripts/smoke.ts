@@ -71,6 +71,16 @@ const evaluation = JSON.parse(
   }),
 );
 if (evaluation.available && !(evaluation.clear?.dps > 0)) process.exitCode = 1;
+await call("suggest_extras", { level: 45, terms: ["fire", "spell", "ignite"], avoid: ["attack"], defence: ["energy shield"], mainSkill: "Fireball" });
+const comparison = JSON.parse(
+  await call("compare_builds", {
+    variants: [
+      { label: "Fireball", class: "Infernalist", level: 30, passives: [], skills: [{ gemId: "Fireball" }], terms: ["fire", "spell"] },
+      { label: "Firebolt wand", class: "Infernalist", level: 30, passives: [], skills: [{ gemId: "Fireball", supports: ["Fiery Death"] }], terms: ["fire", "spell"] },
+    ],
+  }),
+);
+if (comparison.available && comparison.rows?.length !== 2) process.exitCode = 1;
 await call("find_uniques", { terms: ["fire", "spell"], slots: ["Amulet", "Wand"], limit: 3 });
 await call("export_build", {
   name: "Smoke Test Fireball",

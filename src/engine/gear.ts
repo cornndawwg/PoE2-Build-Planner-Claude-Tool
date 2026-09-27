@@ -4,7 +4,9 @@
 
 import type { GameData, PlayerGem } from "../data/gamedata.js";
 import type { BaseItem } from "../data/types.js";
+import { rollableMods } from "../data/mods.js";
 import { adviseFor, modFamilies, statPriorities, type DefenceStyle } from "../gear/priorities.js";
+import { stripMarkup } from "../text.js";
 import { termPattern } from "../tree/scaling.js";
 
 export interface AssumedItem {
@@ -70,6 +72,44 @@ export function midRoll(text: string): string[] {
 
 function itemText(name: string, base: string, itemLevel: number, mods: string[]): string {
   return ["Rarity: RARE", name, base, `Item Level: ${itemLevel}`, ...mods].join("\n");
+}
+
+/** Socketable jewel base for a main attribute. */
+export const JEWEL_FOR_ATTRIBUTE = { str: "Ruby", dex: "Emerald", int: "Sapphire" } as const;
+
+/** The attribute a gem leans on most. */
+export function mainAttribute(gem: PlayerGem): "str" | "dex" | "int" {
+  const w = gem.gem.requirement_weights;
+  if (!w) return "int";
+  if (w.strength >= w.dexterity && w.strength >= w.intelligence) return "str";
+  return w.dexterity >= w.intelligence ? "dex" : "int";
+}
+
+/**
+ * A budget rare jewel: two mods matching what the build scales and one defensive mod
+ * (life, energy shield or a resistance), from the pool of that jewel type.
+ */
+export function assumeJewel(
+  data: GameData,
+  jewelBase: string,
+  req: { terms: string[]; avoid?: string[]; defence: DefenceStyle[] },
+): AssumedItem | undefined {
+  const base = Object.values(data.baseItems).find((b) => b.name === jewelBase && b.item_class === "Jewel");
+  if (!base) return undefined;
+  const pool = rollableMods(data.mods, base, ["item", "misc"]);
+  const avoid = (req.avoid ?? []).map(termPattern);
+  const text = (m: (typeof pool)[number]) => stripMarkup(m.text ?? "");
+  // Offensive: matches the build's terms, isn't avoided, and isn't a resistance (penetration is fine).
+  const isResistance = (t: string) => /resistance/i.test(t) && !/penetrat/i.test(t);
+  const offensive = pool
+    .map((m) => ({ m, score: req.terms.filter((t) => termPattern(t).test(text(m))).length }))
+    .filter(({ m, score }) => score > 0 && !avoid.some((re) => re.test(text(m))) && !isResistance(text(m)))
+    .sort((a, b) => b.score - a.score);
+  const layerWords = req.defence.includes("energy shield") ? /energy shield/i : /maximum life/i;
+  const defensive = pool.find((m) => layerWords.test(text(m))) ?? pool.find((m) => /Resistance/i.test(text(m)) && !/penetrat/i.test(text(m)));
+  const chosen = [...offensive.slice(0, 2).map((x) => x.m), ...(defensive ? [defensive] : [])];
+  const mods = chosen.flatMap((m) => midRoll(text(m)));
+  return { slot: "Jewel", base: base.name, mods, raw: itemText("Assumed Jewel", base.name, 60, mods) };
 }
 
 export interface GearRequest {

@@ -6,7 +6,7 @@ import type { DefenceStyle } from "../gear/priorities.js";
 import { gemLevelForCharacter } from "../skills/levels.js";
 import { completePassives } from "../tree/complete.js";
 import type { PassiveTree } from "../tree/tree.js";
-import { assumeGear, type AssumedItem } from "./gear.js";
+import { assumeGear, assumeJewel, JEWEL_FOR_ATTRIBUTE, mainAttribute, type AssumedItem } from "./gear.js";
 import type { PobEngine } from "./pob.js";
 import { verdict, type Verdict } from "./verdict.js";
 
@@ -148,7 +148,8 @@ function slotFor(data: GameData, item: ItemChoice, taken: Set<string>): string |
     itemClass ??= lines.map((l) => byBase.get(l)).find(Boolean);
   }
   if (!itemClass) return undefined;
-  const options = CLASS_TO_SLOT[itemClass] ?? (itemClass === "Jewel" ? [] : ["Weapon 1"]);
+  if (itemClass === "Jewel") return "Jewel"; // placed in an allocated socket later
+  const options = CLASS_TO_SLOT[itemClass] ?? ["Weapon 1"];
   return options.find((s) => !taken.has(s)) ?? options[0];
 }
 
@@ -180,20 +181,39 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
   if (input.gear.kind === "budget") {
     assumed = assumeGear(data, { level, terms: input.gear.terms, avoid: input.gear.avoid, defence: input.gear.defence, mainSkill: main, weapons: input.gear.weapons });
   }
+  // Jewel sockets the tree actually takes; jewels go in these, in order.
+  const sockets = input.tree ? passives.filter((k) => input.tree!.nodes.get(k)?.isJewelSocket) : [];
+  const freeSockets = [...sockets];
   const chosen: { raw?: string; unique?: string; slot?: string }[] = [];
   const takenSlots = new Set<string>();
   const itemsUsed: string[] = [];
   for (const item of input.items ?? []) {
-    const slot = slotFor(data, item, takenSlots);
+    let slot = slotFor(data, item, takenSlots);
     if (!slot) {
-      notes.push(`Couldn't tell which slot ${item.unique ?? "an item"} goes in${item.unique ? "" : "; give its slot"}. Jewels aren't supported yet.`);
+      notes.push(`Couldn't tell which slot ${item.unique ?? "an item"} goes in${item.unique ? "" : "; give its slot"}.`);
       continue;
+    }
+    if (slot === "Jewel") {
+      const socket = freeSockets.shift();
+      if (!socket) {
+        notes.push(`No free jewel socket for ${item.unique ?? "a jewel"}: take a jewel socket passive on the tree.`);
+        continue;
+      }
+      slot = `Jewel ${socket}`;
     }
     takenSlots.add(slot);
     chosen.push({ ...item, slot });
-    itemsUsed.push(`${item.unique ?? item.raw?.split(/\r?\n/)[1] ?? "item"} (${slot})`);
+    itemsUsed.push(`${item.unique ?? item.raw?.split(/\r?\n/)[1] ?? "item"} (${slot.startsWith("Jewel ") ? "jewel socket" : slot})`);
   }
   const remainingAssumed = assumed.filter((a) => !takenSlots.has(a.slot));
+  // Budget jewels for sockets nothing was chosen for.
+  if (input.gear.kind === "budget") {
+    const jewelBase = JEWEL_FOR_ATTRIBUTE[mainAttribute(main)];
+    for (const socket of freeSockets) {
+      const jewel = assumeJewel(data, jewelBase, input.gear);
+      if (jewel) remainingAssumed.push({ ...jewel, slot: `Jewel ${socket}` });
+    }
+  }
   const items = [...remainingAssumed.map((a) => ({ raw: a.raw, slot: a.slot })), ...chosen];
 
   const skillTexts = input.skills.map(({ gem, supports }) =>

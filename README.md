@@ -60,6 +60,8 @@ The first start downloads about 30 MB of game data to `%APPDATA%\poe2-build-find
 | `leveling_phases` | League-start phases (acts, interludes, maps) with levels, checkpoints and quest rewards |
 | `check_build` | Checks a plan at a character level: skill availability, attribute and Spirit needs, passive budget |
 | `evaluate_build` | Path of Building numbers (damage, kill times, hits survived, resists) and a viability verdict at a level (Windows) |
+| `compare_builds` | Two to four variants calculated the same way, side by side, with which is best for clearing, bossing and survival |
+| `suggest_extras` | Spirit skills (auras, heralds, buffs) that fit and cost, jewel type and mods, unique jewels, flasks and charms |
 | `stat_priorities` | Offensive mods to look for per gear slot and on jewels, plus a defence baseline |
 | `find_uniques` | Uniques that fit the build, with current mods, level and where they drop (no prices — see below) |
 | `create_build_guide` | Writes a Maxroll-style guide page (phases, checks, quest rewards, highlighted passive tree, a Build Planner file per phase) and opens it |

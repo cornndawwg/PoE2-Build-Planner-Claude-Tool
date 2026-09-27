@@ -1,6 +1,6 @@
 {
   "name": "poe2-build-planner-claude-tool",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Free Claude Desktop Extension that turns a PoE2 play fantasy into a playable build.",
   "private": true,
   "type": "module",
