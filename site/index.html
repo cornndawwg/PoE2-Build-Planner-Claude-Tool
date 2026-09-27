@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PoE2 Build Guide Tool</title>
+<meta name="description" content="A free tool for your own Claude that turns a Path of Exile 2 play fantasy into a playable build: skills, passive tree, leveling plan, gear, real Path of Building numbers and an honest verdict.">
+<meta property="og:title" content="PoE2 Build Guide Tool">
+<meta property="og:description" content="Tell Claude what you want to play in Path of Exile 2. Get a full build plan, real numbers and an honest verdict. Free and runs on your PC.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://poe2-buildguide-tool.com/">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+:root{
+  --bg:#0f1115;--panel:#171a21;--panel2:#1d212a;--line:#2a2f3a;--text:#e6e3dc;--muted:#9ea3ad;
+  --accent:#d6a756;--accent2:#f0c77a;--ok:#6cc08b;--warn:#e07a5f;--blue:#6ea8ff;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent2)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+header.top{border-bottom:1px solid var(--line);background:rgba(15,17,21,.9);position:sticky;top:0;z-index:5;backdrop-filter:blur(6px)}
+header.top .wrap{display:flex;align-items:center;justify-content:space-between;height:60px;gap:12px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--text);text-decoration:none;letter-spacing:.2px}
+.brand img{width:26px;height:26px}
+nav a{color:var(--muted);text-decoration:none;margin-left:18px;font-size:15px}
+nav a:hover{color:var(--text)}
+.beta{font-size:11px;font-weight:700;color:#1a1408;background:var(--accent);border-radius:999px;padding:2px 8px;margin-left:4px;vertical-align:middle}
+.hero{padding:72px 0 48px;background:radial-gradient(900px 380px at 70% 0%,rgba(214,167,86,.14),transparent 70%)}
+.hero .wrap{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center}
+h1{font-size:44px;line-height:1.12;margin:0 0 16px;letter-spacing:-.5px}
+h1 em{font-style:normal;color:var(--accent2)}
+.lead{font-size:19px;color:#cfccc4;margin:0 0 26px}
+.cta{display:flex;flex-wrap:wrap;gap:12px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:10px;font-weight:650;text-decoration:none;border:1px solid var(--line);color:var(--text);background:var(--panel2)}
+.btn:hover{border-color:#3b4250}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#1a1408}
+.btn.primary:hover{background:var(--accent2)}
+.small{font-size:14px;color:var(--muted)}
+.chat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 20px 50px rgba(0,0,0,.35)}
+.msg{border-radius:10px;padding:10px 14px;margin:8px 0;font-size:15px}
+.msg.you{background:#243047;margin-left:36px}
+.msg.claude{background:var(--panel2);margin-right:20px}
+.msg b{color:var(--accent2)}
+.verdict{display:flex;gap:8px;align-items:center;margin-top:8px;font-size:14px}
+.pill{font-size:12px;font-weight:700;border-radius:999px;padding:2px 9px;color:#111}
+.pill.rough{background:#e8b04a}.pill.ok{background:var(--ok)}
+section{padding:56px 0;border-top:1px solid var(--line)}
+h2{font-size:30px;margin:0 0 8px;letter-spacing:-.3px}
+.sub{color:var(--muted);margin:0 0 28px;max-width:720px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+.card h3{margin:0 0 6px;font-size:17px}
+.card p{margin:0;color:#c9c6bf;font-size:15px}
+.steps{counter-reset:s;display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.step{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 18px 18px 60px;position:relative}
+.step:before{counter-increment:s;content:counter(s);position:absolute;left:16px;top:16px;width:30px;height:30px;border-radius:50%;background:var(--accent);color:#1a1408;font-weight:800;display:grid;place-items:center}
+.step h3{margin:0 0 4px;font-size:17px}
+.step p{margin:0;color:#c9c6bf;font-size:15px}
+code{background:#232833;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:14px}
+.prompts{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.prompt{background:var(--panel);border:1px dashed #3a4150;border-radius:10px;padding:12px 16px;color:#d9d5cc;font-style:italic}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+ul.clean{margin:0;padding-left:20px}
+ul.clean li{margin:4px 0}
+details{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0}
+summary{cursor:pointer;font-weight:650}
+details p{margin:10px 0 2px;color:#c9c6bf}
+.support{display:flex;gap:24px;align-items:center;justify-content:space-between;background:linear-gradient(135deg,#1d1a14,#171a21);border:1px solid #3a3222;border-radius:14px;padding:26px}
+.support p{margin:6px 0 0;color:#cfccc4}
+footer{border-top:1px solid var(--line);padding:28px 0 40px;color:var(--muted);font-size:14px}
+footer p{margin:6px 0}
+@media (max-width:860px){
+  .hero .wrap,.split{grid-template-columns:1fr}
+  .grid,.steps{grid-template-columns:1fr}
+  .prompts{grid-template-columns:1fr}
+  h1{font-size:34px}
+  nav a:not(.keep){display:none}
+  .support{flex-direction:column;align-items:flex-start}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#"><img src="favicon.svg" alt="">PoE2 Build Guide Tool <span class="beta">BETA</span></a>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#faq">FAQ</a>
+      <a class="keep" href="#support">Support</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<div class="hero">
+  <div class="wrap">
+    <div>
+      <h1>Tell Claude what you want to play. <em>Get a build that actually works.</em></h1>
+      <p class="lead">A free tool for your own Claude that turns a Path of Exile 2 play fantasy into a full plan: skills, passive tree, leveling path and gear. It checks the numbers with Path of Building and tells you honestly how far the build can go.</p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/cornndawwg/PoE2-Build-Planner-Claude-Tool/releases/latest">Download the beta</a>
+        <a class="btn" href="https://github.com/cornndawwg/PoE2-Build-Planner-Claude-Tool">View on GitHub</a>
+      </div>
+      <p class="small">Free and open source (MIT). Runs on your PC inside the Claude desktop app.</p>
+    </div>
+    <div class="chat" aria-label="Example conversation">
+      <div class="msg you">I want to smash bosses with a giant hammer. Not too many buttons, modest budget.</div>
+      <div class="msg claude">A few quick questions first: how far do you want to push it, T15 maps or pinnacle bosses? Softcore or Hardcore?</div>
+      <div class="msg you">Pinnacle bosses, softcore.</div>
+      <div class="msg claude"><b>Titan, Sunder + Boneshatter.</b> At level 90 with modest gear, T15 is comfortable, but pinnacle bosses would be rough: about 90 seconds per boss.
+        <div class="verdict"><span class="pill rough">rough</span> for pinnacle bosses</div>
+        A support swap, a few notables and an anoint add about 69% boss damage without losing any defence. Want me to apply them?</div>
+    </div>
+  </div>
+</div>
+
+<section id="how">
+  <div class="wrap">
+    <h2>How it works</h2>
+    <p class="sub">The tool gives your Claude the game data and the Path of Building calculation engine. You just chat.</p>
+    <div class="steps">
+      <div class="step"><h3>Get Claude Desktop</h3><p>Install the Claude desktop app for Windows or macOS and sign in.</p></div>
+      <div class="step"><h3>Install the tool</h3><p>Download the <code>.mcpb</code> file from the latest release and double-click it, or add it in Claude → Settings → Extensions.</p></div>
+      <div class="step"><h3>Describe your build</h3><p>Start a new chat and say what you want to play. Claude asks a few questions, then builds the plan with you.</p></div>
+    </div>
+    <p class="small" style="margin-top:16px">The first start downloads about 30 MB of public game data. Path of Building numbers are Windows-only for now; everything else works on macOS too.</p>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <h2>What it does</h2>
+    <p class="sub">Made for casual players: your idea comes first, not the current meta.</p>
+    <div class="grid">
+      <div class="card"><h3>Asks before it builds</h3><p>Campaign, fast mapping or bossing? How far do you want to push it? One button or several? Budget, softcore or Hardcore?</p></div>
+      <div class="card"><h3>Real numbers</h3><p>Damage, kill times, hits you survive and resistances, calculated by Path of Building's engine at every stage of the build.</p></div>
+      <div class="card"><h3>Honest verdicts</h3><p>If a build will struggle with your goal, Claude says so and offers options: tweak it, raise the budget or try a different setup.</p></div>
+      <div class="card"><h3>Finds more damage</h3><p>Tries support swaps, passives, Spirit skills and anoints, and keeps only changes that add damage without costing defence.</p></div>
+      <div class="card"><h3>League-start plans</h3><p>A plan for each campaign phase, with the skills and passives for each one and the quest rewards along the way.</p></div>
+      <div class="card"><h3>In-game Build Planner</h3><p>Writes the plan into the game's own Build Planner, one file per phase, so you can follow it while you play.</p></div>
+      <div class="card"><h3>A guide page</h3><p>Opens a build guide in your browser with each phase, your passive tree highlighted, gear to look for and the numbers.</p></div>
+      <div class="card"><h3>Gear and extras</h3><p>Stat priorities per slot, uniques that fit, jewels, flasks, charms, runes, soul cores, anoints and free-Spirit amulets.</p></div>
+      <div class="card"><h3>Prices and trade links</h3><p>Live Currency Exchange prices for currency and runes, and ready-made trade searches you open in your own browser.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Things to ask</h2>
+    <p class="sub">Talk to it like a friend who knows the game.</p>
+    <div class="prompts">
+      <div class="prompt">"I want to summon a huge army and just walk through maps."</div>
+      <div class="prompt">"League start: something with fire and big explosions, self-found."</div>
+      <div class="prompt">"I'm level 72 with this character. Why is it dying so much?"</div>
+      <div class="prompt">"Two-handed mace or one-handed and shield for my Titan? Compare them."</div>
+    </div>
+  </div>
+</section>
+
+<section id="beta">
+  <div class="wrap split">
+    <div>
+      <h2>It's a beta</h2>
+      <p class="sub" style="margin-bottom:12px">It works, but expect rough edges. Please report anything odd on GitHub.</p>
+      <ul class="clean">
+        <li>Numbers are estimates: Path of Building with assumed gear, not your exact items.</li>
+        <li>Verdict targets are sensible rules of thumb, not official numbers.</li>
+        <li>Timeless jewels and Headhunter's stolen mods aren't calculated yet.</li>
+        <li>Prices for uniques and rares come from trade searches you open yourself.</li>
+      </ul>
+    </div>
+    <div>
+      <h2>Privacy</h2>
+      <p class="sub" style="margin-bottom:12px">Everything runs on your PC.</p>
+      <ul class="clean">
+        <li>No account, no tracking, no server of ours in between.</li>
+        <li>It downloads public data: GGG's passive tree export, RePoE and Path of Building data, and Currency Exchange prices.</li>
+        <li>It never touches the game client or your game account.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <h2>FAQ</h2>
+    <details><summary>Is it really free?</summary><p>Yes. It's open source under the MIT license. Donations help, but they never unlock features.</p></details>
+    <details><summary>Do I need a paid Claude plan?</summary><p>You need the Claude desktop app. Long build sessions use a lot of conversation, so a paid plan gives more room, but the tool itself costs nothing.</p></details>
+    <details><summary>Can it get me banned?</summary><p>It doesn't read or change the game, doesn't automate anything and doesn't use your game account. It's a planning tool, like Path of Building or a build guide site.</p></details>
+    <details><summary>Will it just give me the meta build?</summary><p>No. It starts from what you want to play and tries to make that work. If your idea won't reach your goal, it tells you and suggests the closest thing that will.</p></details>
+    <details><summary>Which game version does it use?</summary><p>It downloads current data when it starts and refreshes when the game data changes. Path of Building's engine is bundled and updated with each release.</p></details>
+  </div>
+</section>
+
+<section id="support">
+  <div class="wrap">
+    <div class="support">
+      <div>
+        <h2>Like it? Buy me a coffee.</h2>
+        <p>This is a free hobby project. Tips help keep it updated each league. They're thank-yous only and don't unlock anything.</p>
+      </div>
+      <a class="btn primary" href="https://ko-fi.com/cornndawwg">Support on Ko-fi</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p><strong>This product isn't affiliated with or endorsed by Grinding Gear Games in any way.</strong> Path of Exile is a trademark of Grinding Gear Games.</p>
+    <p>Built on <a href="https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2">Path of Building (PoE2)</a>, <a href="https://github.com/repoe-fork/repoe">RePoE</a> and <a href="https://github.com/grindinggear/poe2-skilltree-export">GGG's passive tree export</a>. Claude is a product of Anthropic; this tool isn't made by Anthropic.</p>
+    <p><a href="https://github.com/cornndawwg/PoE2-Build-Planner-Claude-Tool">GitHub</a> · <a href="https://github.com/cornndawwg/PoE2-Build-Planner-Claude-Tool/issues">Report a problem</a> · <a href="https://ko-fi.com/cornndawwg">Ko-fi</a> · MIT license</p>
+  </div>
+</footer>
+</body>
+</html>
