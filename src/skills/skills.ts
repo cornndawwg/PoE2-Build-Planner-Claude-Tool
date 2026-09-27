@@ -47,6 +47,30 @@ export interface SkillSearchQuery {
 
 const norm = (s: string) => s.toLowerCase().replace(/[\s_-]/g, "");
 
+/** Ids differ only in "Gem/" vs "Gems/" and case; the game uses both spellings. */
+const idKey = (id: string) => id.trim().toLowerCase().replace("/gems/", "/gem/");
+
+/**
+ * Find a gem by its exact id, the id with the other "Gem/"/"Gems/" spelling, or its name.
+ * Names prefer the gem you can cut from an uncut gem over item-granted versions.
+ */
+export function findGem(data: GameData, ref: string): PlayerGem {
+  const exact = data.playerGems.get(ref);
+  if (exact) return exact;
+  const key = idKey(ref);
+  for (const gem of data.playerGems.values()) if (idKey(gem.gameId) === key) return gem;
+
+  const name = ref.trim().toLowerCase();
+  const named = [...data.playerGems.values()].filter((g) => g.name.toLowerCase() === name);
+  const preferred = named.filter((g) => g.source !== "item");
+  const candidates = preferred.length > 0 ? preferred : named;
+  if (candidates.length === 1) return candidates[0]!;
+  if (candidates.length > 1) {
+    throw new Error(`"${ref}" matches several gems: ${candidates.map((g) => `${g.name} (${g.gameId})`).join(", ")}. Use the gemId.`);
+  }
+  throw new Error(`Unknown gem "${ref}". Use a gemId or exact name from search_skills / compatible_supports.`);
+}
+
 export function skillOf(data: GameData, gem: PlayerGem): Skill | undefined {
   return data.skills[gem.grantedEffectId];
 }
@@ -130,8 +154,7 @@ export function compatibleSupports(
   activeGameId: string,
   options: { prefer?: string[]; limit?: number; includeLineage?: boolean } = {},
 ): SupportMatch[] {
-  const activeGem = data.playerGems.get(activeGameId);
-  if (!activeGem) throw new Error(`Unknown gem: ${activeGameId}`);
+  const activeGem = findGem(data, activeGameId);
   const active = skillOf(data, activeGem);
   if (!active?.active_skill) throw new Error(`${activeGem.name} has no active skill`);
 

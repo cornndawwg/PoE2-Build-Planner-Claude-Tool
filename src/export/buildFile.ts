@@ -6,7 +6,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { GameData } from "../data/gamedata.js";
-import { canSupport, skillOf } from "../skills/skills.js";
+import type { PlayerGem } from "../data/gamedata.js";
+import { canSupport, findGem, skillOf } from "../skills/skills.js";
 
 type LevelInterval = number | [number, number];
 
@@ -164,11 +165,21 @@ export function toBuildFile(data: GameData, plan: BuildPlan): BuildResult {
     passives.push(Object.keys(entry).length === 1 ? p.id : entry);
   }
 
+  const lookup = (ref: string): PlayerGem | undefined => {
+    try {
+      return findGem(data, ref);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+      return undefined;
+    }
+  };
+
   const skills: BuildSkill[] = [];
   for (const s of plan.skills) {
-    const gem = data.playerGems.get(s.gemId);
-    if (!gem || gem.kind === "support") {
-      errors.push(`"${s.gemId}" is not a skill gem`);
+    const gem = lookup(s.gemId);
+    if (!gem) continue;
+    if (gem.kind === "support") {
+      errors.push(`${gem.name} is a support gem; put it under a skill's supports`);
       continue;
     }
     if (gem.source === "item") warnings.push(`${gem.name} comes from an item, not a gem; the Build Planner may not show it`);
@@ -176,9 +187,10 @@ export function toBuildFile(data: GameData, plan: BuildPlan): BuildResult {
     const supports: (string | BuildSupport)[] = [];
     const families = new Map<string, string>();
     for (const sup of s.supports ?? []) {
-      const supportGem = data.playerGems.get(sup.gemId);
-      if (!supportGem || supportGem.kind !== "support") {
-        errors.push(`"${sup.gemId}" is not a support gem`);
+      const supportGem = lookup(sup.gemId);
+      if (!supportGem) continue;
+      if (supportGem.kind !== "support") {
+        errors.push(`${supportGem.name} is not a support gem`);
         continue;
       }
       const supportSkill = skillOf(data, supportGem);

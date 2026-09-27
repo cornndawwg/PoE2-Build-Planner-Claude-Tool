@@ -102,3 +102,13 @@ describe.skipIf(!hasCache)("support family warning", () => {
     expect(warnings.join()).toMatch(/same support family/);
   });
 });
+
+describe.skipIf(!hasCache)("export accepts gem names", () => {
+  it("resolves skill and support names to the game's ids", async () => {
+    const data = await loadGameData();
+    const { build } = toBuildFile(data, { name: "x", passives: [], skills: [{ gemId: "Fireball", supports: [{ gemId: "Fiery Death" }] }] });
+    const skill = build.skills![0] as { id: string; support_skills: string[] };
+    expect(skill.id).toBe("Metadata/Items/Gem/SkillGemFireball");
+    expect(skill.support_skills[0]).toMatch(/SupportGemFieryDeath$/);
+  });
+});

@@ -14,7 +14,7 @@ import { compatibleSupports, searchSkills } from "./skills/skills.js";
 import { findScaling } from "./tree/scaling.js";
 import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, withLevels } from "./tree/tree.js";
 
-const VERSION = "0.0.1";
+const VERSION = "0.0.2";
 const log = (message: string) => process.stderr.write(`[poe2-build-planner] ${message}\n`);
 
 const INSTRUCTIONS = `Tools for planning Path of Exile 2 builds (game version 0.5) for casual players.
@@ -155,7 +155,7 @@ server.registerTool(
       "Support gems that can support a skill, ranked: the game's own recommendations first, then tag matches. " +
       "Each result explains why. Lineage supports are rare drops (expensive for a budget build).",
     inputSchema: {
-      gemId: z.string().describe("gemId from search_skills"),
+      gemId: z.string().describe("gemId from search_skills, or the skill's exact name"),
       prefer: z.array(z.string()).optional().describe("Extra tags to favour, e.g. [\"ignite\"]"),
       includeLineage: z.boolean().optional().describe("Include lineage supports (default true)"),
       limit: z.number().int().min(1).max(100).optional(),
@@ -329,12 +329,12 @@ server.registerTool(
       ascendancyPassives: z.array(passiveEntry).optional(),
       skills: z.array(
         z.object({
-          gemId: z.string(),
+          gemId: z.string().describe("gemId or exact gem name"),
           fromLevel: z.number().int().min(0).max(100).optional(),
           toLevel: z.number().int().min(0).max(100).optional().describe("For leveling skills you swap out later"),
           note: z.string().optional(),
           supports: z
-            .array(z.object({ gemId: z.string(), fromLevel: z.number().int().min(0).max(100).optional(), note: z.string().optional() }))
+            .array(z.object({ gemId: z.string().describe("gemId or exact support name"), fromLevel: z.number().int().min(0).max(100).optional(), note: z.string().optional() }))
             .optional(),
         }),
       ),

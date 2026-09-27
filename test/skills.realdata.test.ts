@@ -80,3 +80,26 @@ describe.skipIf(!hasCache)("support families", () => {
     expect(ignite?.alternatives.length).toBeGreaterThan(0);
   });
 });
+
+describe.skipIf(!hasCache)("gem lookup", () => {
+  it("accepts the exact id, the other Gem/Gems spelling, or the name", async () => {
+    const data = await loadGameData();
+    const { findGem } = await import("../src/skills/skills.js");
+    const id = "Metadata/Items/Gem/SkillGemFireball";
+    expect(findGem(data, id).gameId).toBe(id);
+    expect(findGem(data, "Metadata/Items/Gems/SkillGemFireball").gameId).toBe(id);
+    expect(findGem(data, "fireball").gameId).toBe(id);
+    expect(findGem(data, "Ignite II").kind).toBe("support");
+    expect(() => findGem(data, "Not A Gem")).toThrow(/Unknown gem/);
+  });
+
+  it("finds every cuttable gem by name, and asks for an id when names are ambiguous", async () => {
+    const data = await loadGameData();
+    const { findGem } = await import("../src/skills/skills.js");
+    for (const gem of data.playerGems.values()) {
+      if (gem.source !== "item") expect(findGem(data, gem.name).gameId).toBe(gem.gameId);
+    }
+    // Two item-granted skills share this name.
+    expect(() => findGem(data, "Lightning Bolt")).toThrow(/matches several gems/);
+  });
+});
