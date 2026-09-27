@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.mcpb
+*.log
+.env
+.env.*
+
+# Downloaded game data and Path of Building checkouts (never commit or redistribute)
+data-cache/
+vendor/pob/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
