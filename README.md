@@ -39,7 +39,7 @@ Then add it to Claude Desktop's config (`%APPDATA%\Claude\claude_desktop_config.
   "mcpServers": {
     "poe2-build-planner": {
       "command": "node",
-      "args": ["H:/PoE2_Tools/PoE2-Build-Planner-Claude-Tool/dist/server.js"]
+      "args": ["C:/path/to/PoE2-Build-Planner-Claude-Tool/dist/server.js"]
     }
   }
 }
@@ -72,6 +72,10 @@ No unique prices: poe.ninja's API terms ask desktop apps to go through their own
 - Grinding Gear Games — [PoE2 passive tree export](https://github.com/grindinggear/poe2-skilltree-export)
 - [RePoE](https://github.com/repoe-fork/repoe) — game data exports
 - [Path of Building Community (PoE2)](https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2) — calculation engine and data (MIT)
+
+## License
+
+MIT — see [LICENSE](LICENSE). Game data is downloaded at runtime and belongs to Grinding Gear Games.
 
 ## Donations
 

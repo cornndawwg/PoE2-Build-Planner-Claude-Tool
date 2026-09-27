@@ -26,5 +26,10 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.1",
     "zod": "^4.6.5"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cornndawwg/PoE2-Build-Planner-Claude-Tool.git"
   }
 }
