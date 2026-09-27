@@ -13,6 +13,45 @@ Built for casual players on a budget, not meta-chasers.
 - Uses Path of Building's calculation engine for damage and defence numbers.
 - Viability verdicts are **estimates**, not guarantees.
 
+## Try it locally (developers)
+
+Needs Node 20+.
+
+```bash
+npm install
+npm run build
+npm run smoke        # starts the server and calls every tool
+```
+
+Then add it to Claude Desktop's config (`%APPDATA%\Claude\claude_desktop_config.json` on Windows) and restart Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "poe2-build-planner": {
+      "command": "node",
+      "args": ["H:/PoE2_Tools/PoE2-Build-Planner-Claude-Tool/dist/server.js"]
+    }
+  }
+}
+```
+
+The first start downloads about 30 MB of game data to `%APPDATA%\poe2-build-finder\data`.
+
+### Tools so far
+
+| Tool | What it does |
+| :- | :- |
+| `list_classes` | Classes and released ascendancies |
+| `search_skills` | Skills by tags/types/weapon, with where each comes from |
+| `compatible_supports` | Supports that work with a skill, ranked with reasons |
+| `find_passives` | Notables/keystones/ascendancy notables that scale the build, with drawback flags |
+| `plan_passive_tree` | Cheapest path to the chosen passives, with the level to take each point |
+| `stat_priorities` | Offensive mods to look for per gear slot and on jewels, plus a defence baseline |
+| `data_status` | Cached game data info |
+
+Not yet: Path of Building calculations and viability verdicts, unique items, and exporting to the in-game Build Planner.
+
 ## Credits
 
 - Grinding Gear Games — [PoE2 passive tree export](https://github.com/grindinggear/poe2-skilltree-export)
