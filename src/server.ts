@@ -8,13 +8,13 @@ import { z } from "zod";
 import { defaultCacheDir, ensureData, readCachedManifest } from "./data/cache.js";
 import { loadGameData, type GameData, type PlayableClass } from "./data/gamedata.js";
 import { buildFileName, findBuildPlannerDir, INVENTORY_IDS, toBuildFile, writeBuildFile } from "./export/buildFile.js";
-import { SLOT_CLASSES, statPriorities } from "./gear/priorities.js";
+import { DEFENCE_STYLES, SLOT_CLASSES, statPriorities } from "./gear/priorities.js";
 import { findUniques } from "./gear/uniques.js";
 import { compatibleSupports, searchSkills } from "./skills/skills.js";
 import { findScaling } from "./tree/scaling.js";
 import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, withLevels } from "./tree/tree.js";
 
-const VERSION = "0.0.2";
+const VERSION = "0.0.3";
 const log = (message: string) => process.stderr.write(`[poe2-build-planner] ${message}\n`);
 
 const INSTRUCTIONS = `Tools for planning Path of Exile 2 builds (game version 0.5) for casual players.
@@ -258,27 +258,36 @@ server.registerTool(
   {
     title: "Gear and jewel stat priorities",
     description:
-      "For each gear slot (and jewels), the random modifiers that match what the build scales, best first, plus a short defensive " +
-      "baseline. Terms are words from mod text (e.g. fire, spell, cast speed, critical, minion, projectile, attack speed). " +
-      "Use `avoid` to rule out mods, e.g. [\"attack\"] for a caster. Slots: " + Object.keys(SLOT_CLASSES).join(", ") + ".",
+      "For each gear slot (and jewels), the random modifiers that match what the build scales, best first, plus a defence " +
+      "baseline for the build's defence style. Terms are words from mod text (e.g. fire, spell, cast speed, critical, minion, " +
+      "projectile, area of effect, attack speed). Use `avoid` to rule out mods, e.g. [\"attack\"] for a caster. " +
+      "Give `itemLevel` for leveling advice: each mod then shows the best tier that can roll at that level, plus the end-game tier. " +
+      "Slots: " + Object.keys(SLOT_CLASSES).join(", ") + ".",
     inputSchema: {
       terms: z.array(z.string()).min(1),
       avoid: z.array(z.string()).optional(),
       slots: z.array(z.string()).optional().describe("Default: armour, jewellery and jewels"),
       perSlot: z.number().int().min(1).max(20).optional(),
+      defence: z
+        .array(z.enum(DEFENCE_STYLES))
+        .optional()
+        .describe("Defence layers the build uses, e.g. [\"energy shield\"] or [\"life\", \"armour\"]. Resistances are always included. Default: all"),
+      itemLevel: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("Item level to plan for: roughly the area level; during the campaign about the character level"),
     },
     annotations: { readOnlyHint: true },
   },
   async (args) =>
     run(async () => {
-    const { data } = await gameData();
-    const { offence, defence } = statPriorities(data, args);
-    const brief = (s: { slot: string; mods: { side: string; bestTier: string; bestTierLevel: number; matched?: string[] }[] }) => ({
-      slot: s.slot,
-      mods: s.mods.map((m) => ({ side: m.side, best: m.bestTier, itemLevelForBest: m.bestTierLevel })),
-    });
-    return json({ offence: offence.map(brief), defenceBaseline: defence.map(brief) });
-  }),
+      const { data } = await gameData();
+      const { offence, defence } = statPriorities(data, args);
+      return json({ itemLevel: args.itemLevel ?? "end-game", offence, defenceBaseline: defence });
+    }),
 );
 
 server.registerTool(

@@ -34,6 +34,20 @@ export const ARMOUR_AND_JEWELLERY = ["Helmet", "Body Armour", "Gloves", "Boots",
 /** Terms for the defensive baseline every build needs; reported separately from offence. */
 export const DEFENCE_TERMS = ["maximum life", "maximum energy shield", "resistance", "armour", "evasion"];
 
+/** Defence layers a build can lean on. Resistances are always included. */
+export const DEFENCE_STYLES = ["life", "energy shield", "evasion", "armour"] as const;
+export type DefenceStyle = (typeof DEFENCE_STYLES)[number];
+
+const STYLE_PATTERNS: Record<DefenceStyle, RegExp> = {
+  life: /\bmaximum life\b/i,
+  "energy shield": /\benergy shield\b/i,
+  evasion: /\bevasion\b/i,
+  armour: /\barmour\b/i,
+};
+const RESISTANCE = /\bresistances?\b/i;
+/** Mentions defence words but isn't a general defence mod for this slot. */
+const NOT_BASELINE = /penetrat|\bbreak\b|equipped shield/i;
+
 export interface ModFamily {
   /** RePoE mod type: every tier of the same mod shares it. */
   family: string;
@@ -43,13 +57,10 @@ export interface ModFamily {
   /** Item level the best tier needs. */
   bestTierLevel: number;
   tiers: number;
+  /** Every tier, best (highest item level) first. */
+  tierList: { text: string; level: number }[];
   /** Requested terms the mod text matches. */
   matched: string[];
-}
-
-export interface SlotPriorities {
-  slot: string;
-  mods: ModFamily[];
 }
 
 const JEWEL_SOCKETABLE = ["Ruby", "Emerald", "Sapphire"];
@@ -87,13 +98,17 @@ export function modFamilies(data: GameData, itemClasses: string[]): ModFamily[] 
     }
   }
   const families = [...byFamily.values()].map((tiers) => {
-    const best = tiers.reduce((a, b) => (b.required_level > a.required_level ? b : a));
+    const tierList = tiers
+      .map((t) => ({ text: stripMarkup(t.text ?? t.type), level: t.required_level }))
+      .sort((a, b) => b.level - a.level);
+    const best = tierList[0]!;
     return {
-      family: best.type,
-      side: best.generation_type as "prefix" | "suffix",
-      bestTier: stripMarkup(best.text ?? best.type),
-      bestTierLevel: best.required_level,
+      family: tiers[0]!.type,
+      side: tiers[0]!.generation_type as "prefix" | "suffix",
+      bestTier: best.text,
+      bestTierLevel: best.level,
       tiers: tiers.length,
+      tierList,
       matched: [],
     };
   });
@@ -122,7 +137,67 @@ function matching(families: ModFamily[], terms: string[], avoid: string[] = []):
 const isDefence = (f: ModFamily) => !/penetrat/i.test(f.bestTier) && DEFENCE_PATTERNS.some((re) => re.test(f.bestTier));
 
 /**
- * For each slot, the mod families that match what the build scales, best first.
+ * Defence mods for the chosen styles: resistances always, plus the chosen layers, leaving out
+ * mods tied to layers the build doesn't use (e.g. evasion hybrids for an energy shield build).
+ */
+function defenceMods(families: ModFamily[], styles: readonly DefenceStyle[]): ModFamily[] {
+  const unused = DEFENCE_STYLES.filter((s) => s !== "life" && !styles.includes(s));
+  return families
+    .filter((f) => !NOT_BASELINE.test(f.bestTier))
+    .map((f) => ({
+      ...f,
+      matched: [
+        ...(RESISTANCE.test(f.bestTier) ? ["resistance"] : []),
+        ...styles.filter((s) => STYLE_PATTERNS[s].test(f.bestTier)),
+      ],
+    }))
+    .filter((f) => f.matched.length > 0 && !unused.some((s) => STYLE_PATTERNS[s].test(f.bestTier)))
+    .sort((a, b) => b.matched.length - a.matched.length || b.bestTierLevel - a.bestTierLevel);
+}
+
+/** Alternate the build's own defence layer with resistances so neither crowds out the other. */
+function interleaveDefence(mods: ModFamily[]): ModFamily[] {
+  const layer = mods.filter((m) => m.matched.some((t) => t !== "resistance"));
+  const resist = mods.filter((m) => !layer.includes(m));
+  const out: ModFamily[] = [];
+  for (let i = 0; i < Math.max(layer.length, resist.length); i++) {
+    if (layer[i]) out.push(layer[i]!);
+    if (resist[i]) out.push(resist[i]!);
+  }
+  return out;
+}
+
+export interface ModAdvice {
+  side: "prefix" | "suffix";
+  /** Best tier that can roll at the requested item level (or the overall best if none was given). */
+  tier: string;
+  tierItemLevel: number;
+  /** The end-game best tier, when it's better than `tier`. */
+  bestTier?: string;
+  bestTierItemLevel?: number;
+}
+
+/** Pick the best tier available at an item level; undefined if none of its tiers can roll yet. */
+export function adviseFor(family: ModFamily, itemLevel?: number): ModAdvice | undefined {
+  const tier = itemLevel === undefined ? family.tierList[0] : family.tierList.find((t) => t.level <= itemLevel);
+  if (!tier) return undefined;
+  const advice: ModAdvice = { side: family.side, tier: tier.text, tierItemLevel: tier.level };
+  if (tier.level < family.bestTierLevel) {
+    advice.bestTier = family.bestTier;
+    advice.bestTierItemLevel = family.bestTierLevel;
+  }
+  return advice;
+}
+
+export interface SlotAdvice {
+  slot: string;
+  mods: ModAdvice[];
+}
+
+/**
+ * For each slot, the mod families that match what the build scales, best first, and a defence
+ * baseline for the build's defence style. With an item level, each mod shows the best tier
+ * that can roll at that level (mods with no tier yet are left out).
  * Terms are plain words from mod text, e.g. ["fire", "spell", "cast speed", "critical"].
  */
 export function statPriorities(
@@ -133,19 +208,27 @@ export function statPriorities(
     avoid?: string[];
     slots?: string[];
     perSlot?: number;
+    /** Defence layers the build uses. Default: all of them. */
+    defence?: DefenceStyle[];
+    /** Item level to plan for (roughly the area level; during the campaign, about the character level). */
+    itemLevel?: number;
   },
-): { offence: SlotPriorities[]; defence: SlotPriorities[] } {
+): { offence: SlotAdvice[]; defence: SlotAdvice[] } {
   const slots = query.slots ?? [...ARMOUR_AND_JEWELLERY, "Jewel"];
   const perSlot = query.perSlot ?? 6;
-  const offence: SlotPriorities[] = [];
-  const defence: SlotPriorities[] = [];
+  const styles = query.defence?.length ? query.defence : DEFENCE_STYLES;
+  const advise = (list: ModFamily[], limit: number) =>
+    list.flatMap((f) => adviseFor(f, query.itemLevel) ?? []).slice(0, limit);
+
+  const offence: SlotAdvice[] = [];
+  const defence: SlotAdvice[] = [];
   for (const slot of slots) {
     const classes = SLOT_CLASSES[slot];
-    if (!classes) throw new Error(`Unknown slot: ${slot}`);
+    if (!classes) throw new Error(`Unknown slot: ${slot}. Slots: ${Object.keys(SLOT_CLASSES).join(", ")}`);
     const families = modFamilies(data, classes);
     const offensive = matching(families, query.terms, query.avoid).filter((f) => !isDefence(f));
-    offence.push({ slot, mods: offensive.slice(0, perSlot) });
-    defence.push({ slot, mods: matching(families, DEFENCE_TERMS).slice(0, 3) });
+    offence.push({ slot, mods: advise(offensive, perSlot) });
+    defence.push({ slot, mods: advise(interleaveDefence(defenceMods(families, styles)), 4) });
   }
   return { offence, defence };
 }

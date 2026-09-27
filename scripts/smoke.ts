@@ -41,7 +41,7 @@ const passives = JSON.parse(await call("find_passives", { terms: ["fire", "spell
 const main = passives.filter((p: { kind: string }) => p.kind === "notable").slice(0, 4).map((p: { key: string }) => p.key);
 const asc = passives.filter((p: { kind: string }) => p.kind === "ascendancy-notable").slice(0, 2).map((p: { id: string }) => p.id);
 const plan = JSON.parse(await call("plan_passive_tree", { class: "Witch", ascendancy: "Infernalist", passives: main, ascendancyPassives: asc }));
-await call("stat_priorities", { terms: ["fire", "spell", "cast speed"], avoid: ["attack"], slots: ["Amulet", "Jewel"], perSlot: 3 });
+await call("stat_priorities", { terms: ["fire", "spell", "cast speed"], avoid: ["attack"], slots: ["Amulet", "Helmet", "Jewel"], perSlot: 3, defence: ["energy shield"], itemLevel: 30 });
 
 await call("find_uniques", { terms: ["fire", "spell"], slots: ["Amulet", "Wand"], limit: 3 });
 await call("export_build", {
