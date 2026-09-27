@@ -31,6 +31,10 @@ export interface TreeNode {
   isGenericAttribute?: boolean;
   isAscendancyStart?: boolean;
   isMultipleChoice?: boolean;
+  /** One option of a multiple-choice node; picked at the end of a path, never walked through. */
+  isMultipleChoiceOption?: boolean;
+  /** Extra passive points granted by allocating this node. */
+  grantedPassivePoints?: number;
   ascendancyId?: string;
   /** Indexes into `classes` for the classes that start at this node. */
   classStartIndex?: number[];

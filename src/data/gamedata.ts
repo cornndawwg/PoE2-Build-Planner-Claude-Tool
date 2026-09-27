@@ -57,6 +57,16 @@ export interface GameData {
   skills: Record<string, Skill>;
   baseItems: Record<string, BaseItem>;
   mods: Record<string, Mod>;
+  /** Quests that grant passive points, with the area level they're done at. */
+  questPoints: { areaLevel: number; points: number; quest: string }[];
+}
+
+interface PobQuestReward {
+  Act: number;
+  Area?: string;
+  Info?: string;
+  AreaLevel: number;
+  questPoints?: number;
 }
 
 async function readJson<T>(dir: string, file: string): Promise<T> {
@@ -134,14 +144,16 @@ export function buildPlayerGems(
 }
 
 export async function loadGameData(cacheDir: string = defaultCacheDir()): Promise<GameData> {
-  const [tree, gems, skills, baseItems, mods, pobGemsSrc] = await Promise.all([
+  const [tree, gems, skills, baseItems, mods, pobGemsSrc, questSrc] = await Promise.all([
     readJson<TreeExport>(cacheDir, SOURCES.tree.file),
     readJson<Record<string, SkillGem>>(cacheDir, SOURCES.skillGems.file),
     readJson<Record<string, Skill>>(cacheDir, SOURCES.skills.file),
     readJson<Record<string, BaseItem>>(cacheDir, SOURCES.baseItems.file),
     readJson<Record<string, Mod>>(cacheDir, SOURCES.mods.file),
     readFile(join(cacheDir, SOURCES.pobGems.file), "utf8"),
+    readFile(join(cacheDir, SOURCES.pobQuestRewards.file), "utf8"),
   ]);
+  const quests = parseLuaData(questSrc) as unknown as PobQuestReward[];
 
   const releasedGems = new Map(
     Object.entries(gems).filter(([, gem]) => gem.base_item.release_state === "released"),
@@ -156,5 +168,9 @@ export async function loadGameData(cacheDir: string = defaultCacheDir()): Promis
     skills,
     baseItems,
     mods,
+    questPoints: quests
+      .filter((q) => (q.questPoints ?? 0) > 0)
+      .map((q) => ({ areaLevel: q.AreaLevel, points: q.questPoints!, quest: `Act ${q.Act}: ${q.Info ?? q.Area ?? ""}` }))
+      .sort((a, b) => a.areaLevel - b.areaLevel),
   };
 }

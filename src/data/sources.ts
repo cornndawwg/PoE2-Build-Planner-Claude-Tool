@@ -55,6 +55,12 @@ export const SOURCES = {
     format: "lua",
     description: "Path of Building gem list",
   },
+  pobQuestRewards: {
+    url: `${POB}QuestRewards.lua`,
+    file: "pob_quest_rewards.lua",
+    format: "lua",
+    description: "Path of Building quest rewards",
+  },
 } as const satisfies Record<string, DataSource>;
 
 export type SourceKey = keyof typeof SOURCES;
