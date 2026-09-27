@@ -49,6 +49,9 @@ jobs:
 
       - name: Check out Path of Building (no art)
         shell: bash
+        env:
+          # Stop Git Bash rewriting '/src/'-style patterns into Windows paths.
+          MSYS_NO_PATHCONV: "1"
         run: |
           set -euo pipefail
           git config --global core.autocrlf false
