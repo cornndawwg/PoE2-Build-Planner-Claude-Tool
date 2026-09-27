@@ -15,6 +15,6 @@ Thumbs.db
 .vscode/
 .idea/
 scratch/
-build/
+/build/
 release/
 vendor/
