@@ -72,7 +72,7 @@ The first start downloads about 30 MB of game data to `%APPDATA%\poe2-build-find
 
 Path of Building calculations run inside the extension on Windows (see [docs/engine.md](docs/engine.md)); they use assumed budget gear and heuristic verdict bands, so treat them as estimates.
 
-Prices: stackable items (currency, runes, soul cores, Liquid Emotions, omens…) come from GGG's public Currency Exchange data. Uniques and rares aren't priced; `trade_links` gives trade site searches the player opens themselves (the tool never calls the trade site). poe.ninja's API terms ask desktop apps to go through their own backend, so unique prices from it are left for later.
+Prices: stackable items (currency, runes, soul cores, Liquid Emotions, omens…) come from GGG's public Currency Exchange data. Uniques and rares aren't priced; `trade_links` gives trade site searches the player opens themselves (the tool never calls the trade site). For unique and rare prices, the player checks the link — or, if their Claude chat has a browser connection such as Claude in Chrome, Claude offers to look up a few prices in their own browser (only when they say yes). The tool itself has no price backend.
 
 Not calculated yet: timeless jewels (Path of Building for PoE2 has no seed data for them) and Headhunter's stolen monster mods.
 

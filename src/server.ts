@@ -38,7 +38,7 @@ import { completePassives } from "./tree/complete.js";
 import { findScaling } from "./tree/scaling.js";
 import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, withLevels } from "./tree/tree.js";
 
-const VERSION = "0.4.0";
+const VERSION = "0.4.1";
 const log = (message: string) => process.stderr.write(`[poe2-build-planner] ${message}\n`);
 
 const INSTRUCTIONS = `Tools for planning Path of Exile 2 builds (game version 0.5) for casual players.
@@ -59,7 +59,11 @@ To weigh two options (weapon choice, ascendancy, a key unique), use compare_buil
 
 Chase uniques (Mageblood, Headhunter and similar): only suggest them if the player has the budget or asks. Show what they add with compare_builds, with and without the unique in items (flasks are assumed, so Mageblood's effect counts; set flasksActive). Headhunter's stolen rare-monster mods can't be calculated, so describe them instead. Timeless jewels (Heroic Tragedy, Undying Hate) aren't calculated yet either: describe what they do and say the numbers leave them out. Give a trade_links search so the player can see the current price.
 
-Costs: item_prices has live prices for currency, runes, soul cores, Liquid Emotions, omens and other stackables. Uniques and rares aren't priced; give trade_links searches the player opens themselves. Budget/mid/high gear: evaluate_build's gearTier.
+Costs: item_prices has live prices for currency, runes, soul cores, Liquid Emotions, omens and other stackables. Uniques and rares aren't priced by these tools. When the player wants to know what a unique or rare costs:
+1. Give a trade_links search they can open themselves.
+2. If this chat has a browser tool (for example Claude in Chrome), offer to look up the price for them — only a few items, and only after they say yes. Read prices from the trade site or a price site as a person would; if a site shows a CAPTCHA or bot check, stop and let the player take over.
+3. Otherwise, briefly explain how to check it: open the link, sort by price, and ignore the few cheapest listings (often fake or already sold).
+Budget/mid/high gear: evaluate_build's gearTier.
 
 Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → evaluate_build (real numbers and a verdict per phase) → stat_priorities → suggest_extras (Spirit skills, free-Spirit amulets, jewels, flasks and charms, anoints, runes and soul cores) → find_uniques → export_build (ask the player first) → create_build_guide to lay it all out as a web page (ask first; it opens in their browser). For a league start, export one Build Planner file per phase whose setup differs (e.g. "Name - 1 Acts 1-2", "Name - 2 Acts 3-4", "Name - 3 Maps"), so the player can switch plans in game.
 
@@ -730,7 +734,8 @@ server.registerTool(
     title: "Find unique items",
     description:
       "Unique items whose mods match what the build scales, with their full current mods, level requirement and where they drop. " +
-      "No prices are available: treat boss-only drops (bossDrop: true) as likely expensive and prefer common uniques for budget builds. " +
+      "No prices here: treat boss-only drops (bossDrop: true) as likely expensive and prefer common uniques for budget builds. " +
+      "For a price, use trade_links (and, if this chat has a browser tool, offer to check a few prices with the player's OK). " +
       "Slots: " + Object.keys(SLOT_CLASSES).join(", ") + ".",
     inputSchema: {
       terms: z.array(z.string()).min(1).describe("Words from mod text, e.g. [\"fire\", \"spell\"]"),
