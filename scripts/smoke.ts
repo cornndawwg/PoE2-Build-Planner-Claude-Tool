@@ -1,14 +1,20 @@
 // End-to-end check: start the MCP server over stdio like Claude Desktop does, then call each tool.
 // Usage: npm run smoke   (or SMOKE_DIST=1 npm run smoke after npm run build)
 
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
+// Exports go to a temp folder, never the player's real BuildPlanner folder.
+const exportDir = mkdtempSync(join(tmpdir(), "poe2bf-smoke-"));
 const transport = new StdioClientTransport({
   command: process.execPath,
   // SMOKE_DIST=1 tests the compiled build that Claude Desktop runs.
   args: process.env.SMOKE_DIST ? ["dist/server.js"] : ["--import", "tsx", "src/server.ts"],
   stderr: "inherit",
+  env: { ...(process.env as Record<string, string>), POE2BF_BUILDPLANNER_DIR: exportDir },
 });
 const client = new Client({ name: "smoke-test", version: "0.0.1" });
 await client.connect(transport);
@@ -34,8 +40,21 @@ await call("compatible_supports", { gemId: fireball.gemId, limit: 6 });
 const passives = JSON.parse(await call("find_passives", { terms: ["fire", "spell"], class: "Infernalist", limit: 8 }));
 const main = passives.filter((p: { kind: string }) => p.kind === "notable").slice(0, 4).map((p: { key: string }) => p.key);
 const asc = passives.filter((p: { kind: string }) => p.kind === "ascendancy-notable").slice(0, 2).map((p: { id: string }) => p.id);
-await call("plan_passive_tree", { class: "Witch", ascendancy: "Infernalist", passives: main, ascendancyPassives: asc });
+const plan = JSON.parse(await call("plan_passive_tree", { class: "Witch", ascendancy: "Infernalist", passives: main, ascendancyPassives: asc }));
 await call("stat_priorities", { terms: ["fire", "spell", "cast speed"], avoid: ["attack"], slots: ["Amulet", "Jewel"], perSlot: 3 });
+
+await call("export_build", {
+  name: "Smoke Test Fireball",
+  class: "Infernalist",
+  passives: plan.passives.map((p: { id: string; takeAtLevel: number }) => ({ id: p.id, level: p.takeAtLevel })),
+  ascendancyPassives: plan.ascendancyPlan.passives.map((p: { id: string }) => ({ id: p.id })),
+  skills: [{ gemId: fireball.gemId, note: "Main skill" }],
+  gear: [{ slot: "Amulet", title: "Any Amulet", priorities: ["+ Level of all Spell Skills", "Cast Speed"] }],
+});
+const files = readdirSync(exportDir);
+console.log(`exported files: ${files.join(", ")}`);
+if (files.length !== 1) process.exitCode = 1;
+rmSync(exportDir, { recursive: true, force: true });
 
 // Errors should come back as readable tool errors, not crashes.
 const bad = await client.callTool({ name: "plan_passive_tree", arguments: { class: "Necromancer", passives: [] } });

@@ -43,6 +43,8 @@ export interface PlayerGem {
   weaponRequirements: string[];
   tags: string[];
   grantedEffectId: string;
+  /** Supports in the same family (e.g. all Ignite tiers) can't go on the same skill together. */
+  family?: string;
   gem: SkillGem;
 }
 
@@ -110,6 +112,7 @@ interface PobGemEntry {
   Tier: number;
   weaponRequirements?: string;
   tags?: Record<string, boolean>;
+  gemFamily?: string;
 }
 
 /**
@@ -137,6 +140,7 @@ export function buildPlayerGems(
       weaponRequirements: (entry.weaponRequirements ?? "").split(",").map((w) => w.trim()).filter(Boolean),
       tags: Object.keys(entry.tags ?? {}).filter((t) => t !== "grants_active_skill"),
       grantedEffectId: entry.grantedEffectId,
+      family: entry.gemFamily,
       gem,
     });
   }

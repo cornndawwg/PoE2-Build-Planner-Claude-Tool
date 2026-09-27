@@ -68,3 +68,15 @@ describe.skipIf(!hasCache)("skills against real data", () => {
     }
   });
 });
+
+describe.skipIf(!hasCache)("support families", () => {
+  it("offers one support per family and lists the rest as alternatives", async () => {
+    const data = await loadGameData();
+    const fireball = [...data.playerGems.values()].find((g) => g.name === "Fireball")!;
+    const supports = compatibleSupports(data, fireball.gameId, { limit: 1000 });
+    const families = supports.map((s) => data.playerGems.get(s.gameId)!.family).filter(Boolean);
+    expect(new Set(families).size).toBe(families.length);
+    const ignite = supports.find((s) => data.playerGems.get(s.gameId)!.family === "Ignite");
+    expect(ignite?.alternatives.length).toBeGreaterThan(0);
+  });
+});

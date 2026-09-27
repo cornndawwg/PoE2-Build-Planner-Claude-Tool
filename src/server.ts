@@ -7,6 +7,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { defaultCacheDir, ensureData, readCachedManifest } from "./data/cache.js";
 import { loadGameData, type GameData, type PlayableClass } from "./data/gamedata.js";
+import { buildFileName, findBuildPlannerDir, INVENTORY_IDS, toBuildFile, writeBuildFile } from "./export/buildFile.js";
 import { SLOT_CLASSES, statPriorities } from "./gear/priorities.js";
 import { compatibleSupports, searchSkills } from "./skills/skills.js";
 import { findScaling } from "./tree/scaling.js";
@@ -25,7 +26,7 @@ How to help the player:
 - Defences are a baseline every build needs; keep that advice short and focus on what makes their idea work.
 - Verdicts and numbers are estimates, not guarantees.
 
-Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → stat_priorities.
+Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → stat_priorities → export_build (ask the player first).
 
 This tool isn't affiliated with or endorsed by Grinding Gear Games in any way.`;
 
@@ -277,6 +278,92 @@ server.registerTool(
     });
     return json({ offence: offence.map(brief), defenceBaseline: defence.map(brief) });
   }),
+);
+
+const passiveEntry = z.object({
+  id: z.string().describe("Passive id, key or exact name (from plan_passive_tree)"),
+  level: z.number().int().min(1).max(100).optional().describe("Level to take it at (takeAtLevel)"),
+  note: z.string().optional().describe("Shown when hovering the passive in game"),
+});
+
+server.registerTool(
+  "export_build",
+  {
+    title: "Export to the in-game Build Planner",
+    description:
+      "Write the finished build as a .build file into Path of Exile 2's BuildPlanner folder, where the game picks it up " +
+      "(passives with the level to take them, skills and supports with level ranges, and gear stat priorities per slot). " +
+      "Ask the player before writing. If the game folder isn't found, the file contents are returned to save manually. " +
+      "Gear slots: " + Object.keys(INVENTORY_IDS).join(", ") + ".",
+    inputSchema: {
+      name: z.string().min(1).max(80),
+      description: z.string().optional(),
+      class: z.string().describe("Class or ascendancy name"),
+      ascendancy: z.string().optional(),
+      passives: z.array(passiveEntry),
+      ascendancyPassives: z.array(passiveEntry).optional(),
+      skills: z.array(
+        z.object({
+          gemId: z.string(),
+          fromLevel: z.number().int().min(0).max(100).optional(),
+          toLevel: z.number().int().min(0).max(100).optional().describe("For leveling skills you swap out later"),
+          note: z.string().optional(),
+          supports: z
+            .array(z.object({ gemId: z.string(), fromLevel: z.number().int().min(0).max(100).optional(), note: z.string().optional() }))
+            .optional(),
+        }),
+      ),
+      gear: z
+        .array(
+          z.object({
+            slot: z.string(),
+            title: z.string().optional().describe("e.g. \"Energy Shield base (Int)\""),
+            priorities: z.array(z.string()).optional().describe("Stats to look for, most important first"),
+            uniqueName: z.string().optional(),
+            note: z.string().optional(),
+          }),
+        )
+        .optional(),
+      write: z.boolean().optional().describe("Write the file (default true). false = just return it"),
+      overwrite: z.boolean().optional().describe("Replace an existing file with the same name that this tool didn't write"),
+    },
+  },
+  async (args) =>
+    run(async () => {
+      const { data, tree } = await gameData();
+      const { asc } = findClass(data, args.class, args.ascendancy);
+      const toPassive = (p: z.infer<typeof passiveEntry>) => ({
+        id: tree.describe(resolveNode(tree, p.id)).id,
+        level: p.level,
+        note: p.note,
+      });
+      const { build, warnings } = toBuildFile(data, {
+        name: args.name,
+        description: args.description,
+        ascendancyId: asc?.id,
+        passives: [...args.passives, ...(args.ascendancyPassives ?? [])].map(toPassive),
+        skills: args.skills,
+        slots: args.gear,
+      });
+      const dir = findBuildPlannerDir();
+      if (args.write === false || !dir) {
+        return json({
+          written: false,
+          reason: dir ? "write was false" : "Path of Exile 2's Documents folder wasn't found",
+          saveAs: dir ? undefined : `Documents/My Games/Path of Exile 2/BuildPlanner/${buildFileName(build.name)}`,
+          warnings,
+          build,
+        });
+      }
+      const path = await writeBuildFile(build, dir, args.overwrite ?? false);
+      return json({
+        written: true,
+        path,
+        warnings,
+        nextStep: "Open the Build Planner in game (or restart the game if it was open) to see the build.",
+        counts: { passives: build.passives?.length ?? 0, skills: build.skills?.length ?? 0, gearHints: build.inventory_slots?.length ?? 0 },
+      });
+    }),
 );
 
 await server.connect(new StdioServerTransport());

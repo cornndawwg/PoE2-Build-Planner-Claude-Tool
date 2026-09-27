@@ -26,6 +26,8 @@ export interface SupportMatch {
   tags: string[];
   text: string;
   recommendedByGame: boolean;
+  /** Other supports in the same family (only one per family fits on a skill). */
+  alternatives: string[];
   score: number;
   reasons: string[];
 }
@@ -160,9 +162,25 @@ export function compatibleSupports(
       tags: gem.tags.filter((t) => t !== "support"),
       text: stripMarkup(gem.gem.support_text ?? ""),
       recommendedByGame,
+      alternatives: [],
       score: (recommendedByGame ? 3 : 0) + overlap.length - (sourceNote?.penalty ?? 0),
       reasons,
     });
   }
-  return matches.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)).slice(0, options.limit ?? 30);
+  matches.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+
+  // Keep the best-ranked support of each family; list the others as alternatives.
+  const bestOfFamily = new Map<string, SupportMatch>();
+  const result: SupportMatch[] = [];
+  for (const match of matches) {
+    const family = data.playerGems.get(match.gameId)?.family;
+    const best = family ? bestOfFamily.get(family) : undefined;
+    if (best) {
+      best.alternatives.push(match.name);
+      continue;
+    }
+    if (family) bestOfFamily.set(family, match);
+    result.push(match);
+  }
+  return result.slice(0, options.limit ?? 30);
 }

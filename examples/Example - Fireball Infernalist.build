@@ -1,0 +1,341 @@
+{
+  "name": "Example - Fireball Infernalist",
+  "author": "PoE2 Build Planner (Claude tool)",
+  "description": "Sample export from the PoE2 Build Planner Claude tool, for checking in-game import. Not a tuned build.",
+  "ascendancy": "Witch1",
+  "passives": [
+    {
+      "id": "spells18",
+      "level_interval": [
+        2,
+        100
+      ]
+    },
+    {
+      "id": "intelligence11",
+      "level_interval": [
+        3,
+        100
+      ]
+    },
+    {
+      "id": "intelligence12",
+      "level_interval": [
+        4,
+        100
+      ]
+    },
+    {
+      "id": "intelligence13",
+      "level_interval": [
+        5,
+        100
+      ]
+    },
+    {
+      "id": "intelligence14",
+      "level_interval": [
+        6,
+        100
+      ]
+    },
+    {
+      "id": "intelligence15",
+      "level_interval": [
+        7,
+        100
+      ]
+    },
+    {
+      "id": "intelligence16",
+      "level_interval": [
+        8,
+        100
+      ]
+    },
+    {
+      "id": "spells1",
+      "level_interval": [
+        9,
+        100
+      ]
+    },
+    {
+      "id": "spells3",
+      "level_interval": [
+        10,
+        100
+      ]
+    },
+    {
+      "id": "spells12",
+      "level_interval": [
+        10,
+        100
+      ]
+    },
+    {
+      "id": "spells33",
+      "level_interval": [
+        10,
+        100
+      ]
+    },
+    {
+      "id": "intelligence6",
+      "level_interval": [
+        11,
+        100
+      ]
+    },
+    {
+      "id": "attributes21",
+      "level_interval": [
+        12,
+        100
+      ]
+    },
+    {
+      "id": "spell_criticals13",
+      "level_interval": [
+        12,
+        100
+      ]
+    },
+    {
+      "id": "spell_criticals5",
+      "level_interval": [
+        12,
+        100
+      ]
+    },
+    {
+      "id": "spell_criticals11_",
+      "level_interval": [
+        13,
+        100
+      ]
+    },
+    {
+      "id": "intelligence35_",
+      "level_interval": [
+        14,
+        100
+      ]
+    },
+    {
+      "id": "intelligence83",
+      "level_interval": [
+        15,
+        100
+      ]
+    },
+    {
+      "id": "intelligence37",
+      "level_interval": [
+        16,
+        100
+      ]
+    },
+    {
+      "id": "intelligence38",
+      "level_interval": [
+        17,
+        100
+      ]
+    },
+    {
+      "id": "intelligence2",
+      "level_interval": [
+        18,
+        100
+      ]
+    },
+    {
+      "id": "intelligence49",
+      "level_interval": [
+        19,
+        100
+      ]
+    },
+    {
+      "id": "attributes14",
+      "level_interval": [
+        20,
+        100
+      ]
+    },
+    {
+      "id": "attributes13",
+      "level_interval": [
+        21,
+        100
+      ]
+    },
+    {
+      "id": "jewel_slot1969",
+      "level_interval": [
+        22,
+        100
+      ]
+    },
+    {
+      "id": "intelligence41__",
+      "level_interval": [
+        23,
+        100
+      ]
+    },
+    {
+      "id": "fire78_",
+      "level_interval": [
+        24,
+        100
+      ]
+    },
+    {
+      "id": "fire77",
+      "level_interval": [
+        25,
+        100
+      ]
+    },
+    {
+      "id": "fire74",
+      "level_interval": [
+        25,
+        100
+      ]
+    },
+    {
+      "id": "fire85",
+      "level_interval": [
+        25,
+        100
+      ]
+    },
+    {
+      "id": "intelligence39",
+      "level_interval": [
+        26,
+        100
+      ]
+    },
+    {
+      "id": "intelligence40",
+      "level_interval": [
+        27,
+        100
+      ]
+    },
+    {
+      "id": "intelligence33_",
+      "level_interval": [
+        28,
+        100
+      ]
+    },
+    {
+      "id": "intelligence34",
+      "level_interval": [
+        28,
+        100
+      ]
+    },
+    {
+      "id": "strength8",
+      "level_interval": [
+        28,
+        100
+      ]
+    },
+    {
+      "id": "strength7",
+      "level_interval": [
+        29,
+        100
+      ]
+    },
+    {
+      "id": "strength6",
+      "level_interval": [
+        30,
+        100
+      ]
+    },
+    {
+      "id": "strength12",
+      "level_interval": [
+        31,
+        100
+      ]
+    },
+    {
+      "id": "strength89",
+      "level_interval": [
+        32,
+        100
+      ]
+    },
+    {
+      "id": "strength16",
+      "level_interval": [
+        33,
+        100
+      ]
+    },
+    {
+      "id": "fire27",
+      "level_interval": [
+        34,
+        100
+      ]
+    },
+    {
+      "id": "fire_penetration1",
+      "level_interval": [
+        34,
+        100
+      ]
+    },
+    {
+      "id": "fire33",
+      "level_interval": [
+        34,
+        100
+      ]
+    },
+    "AscendancyWitch1Small7",
+    "AscendancyWitch1Notable7",
+    "AscendancyWitch1Small11",
+    "AscendancyWitch1Notable11_",
+    "AscendancyWitch1Small10",
+    "AscendancyWitch1Notable10"
+  ],
+  "skills": [
+    {
+      "id": "Metadata/Items/Gem/SkillGemFireball",
+      "additional_text": "Main skill",
+      "support_skills": [
+        "Metadata/Items/Gems/SupportGemFieryDeath",
+        "Metadata/Items/Gem/SupportGemWildshards",
+        "Metadata/Items/Gems/SupportGemControlledDestruction",
+        "Metadata/Items/Gems/SupportGemFireExposure"
+      ]
+    }
+  ],
+  "inventory_slots": [
+    {
+      "inventory_id": "Amulet1",
+      "additional_text": "<silver>{Any Amulet}\n\n<grey>{Stat Priority\n-------------------\n1. +3 to Level of all Spell Skills\n2. (27-30)% increased Spell Damage\n3. (35-39)% increased Critical Damage Bonus}"
+    },
+    {
+      "inventory_id": "Ring1",
+      "additional_text": "<silver>{Any Ring}\n\n<grey>{Stat Priority\n-------------------\n1. (27-30)% increased Fire Damage\n2. (22-24)% increased Cast Speed}"
+    },
+    {
+      "inventory_id": "Helm1",
+      "additional_text": "<silver>{Energy Shield base (Int)}\n\n<grey>{Stat Priority\n-------------------\n1. (30-34)% increased Critical Hit Chance}"
+    }
+  ]
+}
