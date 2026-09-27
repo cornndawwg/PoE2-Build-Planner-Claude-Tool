@@ -3,13 +3,28 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PoE2 Build Guide Tool</title>
-<meta name="description" content="A free tool for your own Claude that turns a Path of Exile 2 play fantasy into a playable build: skills, passive tree, leveling plan, gear, real Path of Building numbers and an honest verdict.">
-<meta property="og:title" content="PoE2 Build Guide Tool">
-<meta property="og:description" content="Tell Claude what you want to play in Path of Exile 2. Get a full build plan, real numbers and an honest verdict. Free and runs on your PC.">
+<title>PoE2 Build Planner &amp; Guide Tool — Free Path of Exile 2 Builds</title>
+<meta name="description" content="Free Path of Exile 2 build planner for Claude. Describe the build you want and get skills, passive tree, leveling guide and gear, checked with Path of Building.">
+<link rel="canonical" href="https://poe2-buildguide-tool.com/">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="theme-color" content="#0f1115">
+<meta name="keywords" content="PoE2 build planner, Path of Exile 2 build guide, PoE2 builds, PoE2 leveling guide, PoE2 league starter, Path of Building PoE2, PoE2 passive tree planner, Claude MCP, Claude Desktop extension">
+<meta property="og:site_name" content="PoE2 Build Guide Tool">
+<meta property="og:title" content="PoE2 Build Planner &amp; Guide Tool for Claude">
+<meta property="og:description" content="Tell Claude what you want to play in Path of Exile 2. Get a full build plan, a leveling guide, Path of Building numbers and an honest verdict. Free and runs on your PC.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://poe2-buildguide-tool.com/">
+<meta property="og:image" content="https://poe2-buildguide-tool.com/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="PoE2 Build Guide Tool: tell Claude what you want to play, get a build that works">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="PoE2 Build Planner &amp; Guide Tool for Claude">
+<meta name="twitter:description" content="Describe the Path of Exile 2 build you want. Get skills, passive tree, leveling guide and Path of Building numbers. Free.">
+<meta name="twitter:image" content="https://poe2-buildguide-tool.com/og-image.png">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<script type="application/ld+json">[{"@context":"https://schema.org","@type":"SoftwareApplication","name":"PoE2 Build Guide Tool","alternateName":["PoE2 Build Planner for Claude","Path of Exile 2 Build Planner"],"description":"A free Claude Desktop extension that turns a Path of Exile 2 play fantasy into a playable build: class and ascendancy, skills and support gems, passive tree, leveling guide, gear priorities, and Path of Building numbers with an honest verdict.","applicationCategory":"GameApplication","applicationSubCategory":"Build planner","operatingSystem":"Windows, macOS","softwareVersion":"0.5.0","url":"https://poe2-buildguide-tool.com/","downloadUrl":"https://github.com/cornndawwg/PoE2-Build-Planner-Claude-Tool/releases/latest","license":"https://opensource.org/licenses/MIT","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"image":"https://poe2-buildguide-tool.com/og-image.png"},{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is the PoE2 Build Guide Tool free?","acceptedAnswer":{"@type":"Answer","text":"Yes. It's free and open source under the MIT license. Donations help, but they never unlock features."}},{"@type":"Question","name":"Do I need a paid Claude plan?","acceptedAnswer":{"@type":"Answer","text":"You need the Claude desktop app. Long build sessions use a lot of conversation, so a paid plan gives more room, but the tool itself costs nothing."}},{"@type":"Question","name":"Can it get me banned in Path of Exile 2?","acceptedAnswer":{"@type":"Answer","text":"It doesn't read or change the game, doesn't automate anything and doesn't use your game account. It's a planning tool, like Path of Building or a build guide site."}},{"@type":"Question","name":"Will it just give me the meta build?","acceptedAnswer":{"@type":"Answer","text":"No. It starts from what you want to play and tries to make that work. If your idea won't reach your goal, it tells you and suggests the closest thing that will."}},{"@type":"Question","name":"Does it use Path of Building?","acceptedAnswer":{"@type":"Answer","text":"Yes. It runs Path of Building's PoE2 calculation engine on your PC to calculate damage, kill times, defences and resistances for your build."}}]},{"@context":"https://schema.org","@type":"WebSite","name":"PoE2 Build Guide Tool","url":"https://poe2-buildguide-tool.com/"}]</script>
 <style>
 :root{
   --bg:#0f1115;--panel:#171a21;--panel2:#1d212a;--line:#2a2f3a;--text:#e6e3dc;--muted:#9ea3ad;
@@ -31,6 +46,12 @@ nav a:hover{color:var(--text)}
 .hero .wrap{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center}
 h1{font-size:44px;line-height:1.12;margin:0 0 16px;letter-spacing:-.5px}
 h1 em{font-style:normal;color:var(--accent2)}
+.eyebrow{margin:0 0 10px;color:var(--accent);font-weight:700;letter-spacing:.6px;text-transform:uppercase;font-size:13px}
+.classes{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.cls{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.cls h3{margin:0 0 2px;font-size:16px}
+.cls p{margin:0;color:var(--muted);font-size:14px}
+@media (max-width:860px){.classes{grid-template-columns:repeat(2,1fr)}}
 .lead{font-size:19px;color:#cfccc4;margin:0 0 26px}
 .cta{display:flex;flex-wrap:wrap;gap:12px}
 .btn{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex-shrink:0;padding:12px 20px;border-radius:10px;font-weight:650;text-decoration:none;border:1px solid var(--line);color:var(--text);background:var(--panel2)}
@@ -84,10 +105,11 @@ footer p{margin:6px 0}
 <body>
 <header class="top">
   <div class="wrap">
-    <a class="brand" href="#"><img src="favicon.svg" alt="">PoE2 Build Guide Tool <span class="beta">BETA</span></a>
+    <a class="brand" href="/"><img src="favicon.svg" alt="PoE2 Build Guide Tool logo" width="26" height="26">PoE2 Build Guide Tool <span class="beta">BETA</span></a>
     <nav>
       <a href="#how">How it works</a>
       <a href="#features">Features</a>
+      <a href="#classes">Classes</a>
       <a href="#faq">FAQ</a>
       <a class="keep" href="#support">Support</a>
     </nav>
@@ -98,7 +120,8 @@ footer p{margin:6px 0}
 <div class="hero">
   <div class="wrap">
     <div>
-      <h1>Tell Claude what you want to play. <em>Get a build that actually works.</em></h1>
+      <p class="eyebrow">Free Path of Exile 2 build planner</p>
+      <h1>Tell Claude what you want to play in PoE2. <em>Get a build that actually works.</em></h1>
       <p class="lead">A free tool for your own Claude that turns a Path of Exile 2 play fantasy into a full plan: skills, passive tree, leveling path and gear. It checks the numbers with Path of Building and tells you honestly how far the build can go.</p>
       <div class="cta">
         <a class="btn primary" href="https://github.com/cornndawwg/PoE2-Build-Planner-Claude-Tool/releases/latest">Download the beta</a>
@@ -148,6 +171,33 @@ footer p{margin:6px 0}
   </div>
 </section>
 
+<section id="classes">
+  <div class="wrap">
+    <h2>PoE2 builds for every class and ascendancy</h2>
+    <p class="sub">Pick a class, an ascendancy or just a feeling. Claude plans the build around it using current game data.</p>
+    <div class="classes">
+      <div class="cls"><h3>Witch</h3><p>Infernalist, Blood Mage, Lich</p></div>
+      <div class="cls"><h3>Sorceress</h3><p>Stormweaver, Chronomancer, Disciple of Varashta</p></div>
+      <div class="cls"><h3>Warrior</h3><p>Titan, Warbringer, Smith of Kitava</p></div>
+      <div class="cls"><h3>Ranger</h3><p>Deadeye, Pathfinder</p></div>
+      <div class="cls"><h3>Huntress</h3><p>Amazon, Spirit Walker, Ritualist</p></div>
+      <div class="cls"><h3>Mercenary</h3><p>Tactician, Witchhunter, Gemling Legionnaire</p></div>
+      <div class="cls"><h3>Monk</h3><p>Martial Artist, Invoker, Acolyte of Chayula</p></div>
+      <div class="cls"><h3>Druid</h3><p>Oracle, Shaman</p></div>
+    </div>
+    <div class="split" style="margin-top:28px">
+      <div>
+        <h3>League starters and leveling guides</h3>
+        <p class="small" style="font-size:15px;color:#c9c6bf">Starting a new league? You get a PoE2 leveling guide for your build: which skills to use in each act, the passive points to take along the way, the quest rewards not to miss and when to switch to your main setup. Each stage is saved to the in-game Build Planner.</p>
+      </div>
+      <div>
+        <h3>A Path of Building companion</h3>
+        <p class="small" style="font-size:15px;color:#c9c6bf">The numbers come from Path of Building's PoE2 engine running on your PC: DPS against maps and bosses, kill times, effective HP, maximum hit and resistances. You don't have to learn Path of Building to use it.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section>
   <div class="wrap">
     <h2>Things to ask</h2>
@@ -188,10 +238,11 @@ footer p{margin:6px 0}
 <section id="faq">
   <div class="wrap">
     <h2>FAQ</h2>
-    <details><summary>Is it really free?</summary><p>Yes. It's open source under the MIT license. Donations help, but they never unlock features.</p></details>
+    <details><summary>Is the PoE2 Build Guide Tool free?</summary><p>Yes. It's free and open source under the MIT license. Donations help, but they never unlock features.</p></details>
     <details><summary>Do I need a paid Claude plan?</summary><p>You need the Claude desktop app. Long build sessions use a lot of conversation, so a paid plan gives more room, but the tool itself costs nothing.</p></details>
-    <details><summary>Can it get me banned?</summary><p>It doesn't read or change the game, doesn't automate anything and doesn't use your game account. It's a planning tool, like Path of Building or a build guide site.</p></details>
+    <details><summary>Can it get me banned in Path of Exile 2?</summary><p>It doesn't read or change the game, doesn't automate anything and doesn't use your game account. It's a planning tool, like Path of Building or a build guide site.</p></details>
     <details><summary>Will it just give me the meta build?</summary><p>No. It starts from what you want to play and tries to make that work. If your idea won't reach your goal, it tells you and suggests the closest thing that will.</p></details>
+    <details><summary>Does it use Path of Building?</summary><p>Yes. It runs Path of Building's PoE2 calculation engine on your PC to calculate damage, kill times, defences and resistances for your build.</p></details>
     <details><summary>Which game version does it use?</summary><p>It downloads current data when it starts and refreshes when the game data changes. Path of Building's engine is bundled and updated with each release.</p></details>
   </div>
 </section>

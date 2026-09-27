@@ -1,2 +1,4 @@
 User-agent: *
 Allow: /
+
+Sitemap: https://poe2-buildguide-tool.com/sitemap.xml

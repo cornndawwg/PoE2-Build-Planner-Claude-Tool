@@ -4,6 +4,8 @@ A free Claude Desktop Extension that helps Path of Exile 2 players turn a play f
 
 Built for casual players on a budget, not meta-chasers.
 
+**Website:** [poe2-buildguide-tool.com](https://poe2-buildguide-tool.com)
+
 > **Status:** early development. See [docs/research-brief.md](docs/research-brief.md) for the design and build order.
 
 ## How it works
