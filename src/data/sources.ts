@@ -14,7 +14,8 @@ export interface DataSource {
   url: string;
   /** File name inside the cache directory. */
   file: string;
-  format: "json" | "lua";
+  /** "text" files are downloaded as-is (validated by their own parser when loaded). */
+  format: "json" | "lua" | "text";
   description: string;
 }
 
@@ -55,6 +56,24 @@ export const SOURCES = {
     format: "lua",
     description: "Path of Building gem list",
   },
+  pobRunes: {
+    url: `${POB}ModRunes.lua`,
+    file: "pob_runes.lua",
+    format: "lua",
+    description: "Path of Building runes, soul cores and other socketables",
+  },
+  pobQueryMods: {
+    url: `${POB}QueryMods.lua`,
+    file: "pob_query_mods.lua",
+    format: "lua",
+    description: "Path of Building trade-site stat ids",
+  },
+  pobAmuletBases: {
+    url: `${POB}Bases/amulet.lua`,
+    file: "pob_bases_amulet.lua",
+    format: "text",
+    description: "Path of Building amulet bases (granted skills)",
+  },
   pobQuestRewards: {
     url: `${POB}QuestRewards.lua`,
     file: "pob_quest_rewards.lua",
@@ -65,7 +84,7 @@ export const SOURCES = {
 
 /** Path of Building's unique item files that hold wearable gear. */
 export const UNIQUE_FILES = [
-  "amulet", "belt", "body", "boots", "bow", "crossbow", "focus", "gloves", "helmet", "jewel",
+  "amulet", "belt", "body", "boots", "bow", "crossbow", "flask", "focus", "gloves", "helmet", "jewel",
   "mace", "quiver", "ring", "sceptre", "shield", "spear", "staff", "talisman", "wand",
 ] as const;
 

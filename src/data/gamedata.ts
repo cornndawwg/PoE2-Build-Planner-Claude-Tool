@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { defaultCacheDir } from "./cache.js";
 import { parseLuaData } from "./lua.js";
+import { parseSkillAmuletBases, parseSocketables, parseTradeStats, type SkillAmuletBase, type Socketable } from "./pobextra.js";
 import { parseUniqueFile, type UniqueItem } from "./uniques.js";
 import { SOURCES, UNIQUE_SOURCES } from "./sources.js";
 import type { BaseItem, Mod, Skill, SkillGem, TreeExport, TreeNode } from "./types.js";
@@ -66,6 +67,12 @@ export interface GameData {
   questPoints: { areaLevel: number; points: number; quest: string }[];
   /** Every campaign quest reward, in campaign order. */
   questRewards: QuestReward[];
+  /** Amulet bases whose granted skill costs no Spirit (Lament, Portent, Absent…). */
+  skillAmuletBases: SkillAmuletBase[];
+  /** Runes, soul cores, idols and other socketables. */
+  socketables: Socketable[];
+  /** Trade site stat ids by mod template ("#% increased spell damage"). */
+  tradeStats: Map<string, string>;
   /** Quests that grant Spirit (e.g. "+30 to Spirit"), with the area level they're done at. */
   questSpirit: { areaLevel: number; spirit: number; quest: string }[];
 }
@@ -169,7 +176,7 @@ export function buildPlayerGems(
 }
 
 export async function loadGameData(cacheDir: string = defaultCacheDir()): Promise<GameData> {
-  const [tree, gems, skills, baseItems, mods, pobGemsSrc, questSrc] = await Promise.all([
+  const [tree, gems, skills, baseItems, mods, pobGemsSrc, questSrc, runesSrc, queryModsSrc, amuletBasesSrc] = await Promise.all([
     readJson<TreeExport>(cacheDir, SOURCES.tree.file),
     readJson<Record<string, SkillGem>>(cacheDir, SOURCES.skillGems.file),
     readJson<Record<string, Skill>>(cacheDir, SOURCES.skills.file),
@@ -177,6 +184,9 @@ export async function loadGameData(cacheDir: string = defaultCacheDir()): Promis
     readJson<Record<string, Mod>>(cacheDir, SOURCES.mods.file),
     readFile(join(cacheDir, SOURCES.pobGems.file), "utf8"),
     readFile(join(cacheDir, SOURCES.pobQuestRewards.file), "utf8"),
+    readFile(join(cacheDir, SOURCES.pobRunes.file), "utf8"),
+    readFile(join(cacheDir, SOURCES.pobQueryMods.file), "utf8"),
+    readFile(join(cacheDir, SOURCES.pobAmuletBases.file), "utf8"),
   ]);
   const quests = parseLuaData(questSrc) as unknown as PobQuestReward[];
   const classOfBase = new Map(Object.values(baseItems).map((b) => [b.name, b.item_class]));
@@ -200,6 +210,9 @@ export async function loadGameData(cacheDir: string = defaultCacheDir()): Promis
     skills,
     baseItems,
     mods,
+    skillAmuletBases: parseSkillAmuletBases(amuletBasesSrc),
+    socketables: parseSocketables(parseLuaData(runesSrc)),
+    tradeStats: parseTradeStats(parseLuaData(queryModsSrc)),
     uniques: uniqueFiles.flat().map((u) => ({ ...u, itemClass: classOfBase.get(u.baseType) })),
     questRewards: quests.map((q) => ({
       act: q.Description ?? `Act ${q.Act}`,

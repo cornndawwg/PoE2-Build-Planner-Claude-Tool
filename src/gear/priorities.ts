@@ -27,6 +27,8 @@ export const SLOT_CLASSES: Record<string, string[]> = {
   Quarterstaff: ["Warstaff"],
   Talisman: ["Talisman"],
   Jewel: ["Jewel"],
+  Flask: ["LifeFlask", "ManaFlask"],
+  Charm: ["UtilityFlask"],
 };
 
 export const ARMOUR_AND_JEWELLERY = ["Helmet", "Body Armour", "Gloves", "Boots", "Amulet", "Ring", "Belt"];

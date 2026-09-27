@@ -61,10 +61,24 @@ export function pickBase(data: GameData, itemClass: string, itemLevel: number, t
   return bases.sort((a, b) => (b.drop_level ?? 0) - (a.drop_level ?? 0))[0];
 }
 
+/** How good the assumed gear is. */
+export type GearTier = "budget" | "mid" | "high";
+/** Where in each value range the tier's rolls land (0 = worst, 1 = best), and how many extra mods it gets. */
+const TIER = {
+  budget: { roll: 0.5, extraOffence: 0, extraResistance: 0 },
+  mid: { roll: 0.75, extraOffence: 1, extraResistance: 1 },
+  high: { roll: 1, extraOffence: 2, extraResistance: 1 },
+} as const;
+
 /** "(45-54)% increased Fire Damage" → "50% increased Fire Damage"; hybrid mods become several lines. */
 export function midRoll(text: string): string[] {
+  return rollAt(text, 0.5);
+}
+
+/** Fill every "(min-max)" range at a point between min (0) and max (1). */
+export function rollAt(text: string, fraction: number): string[] {
   return text
-    .replace(/\((-?\d+(?:\.\d+)?)-(-?\d+(?:\.\d+)?)\)/g, (_, a: string, b: string) => String(Math.round((Number(a) + Number(b)) / 2)))
+    .replace(/\((-?\d+(?:\.\d+)?)-(-?\d+(?:\.\d+)?)\)/g, (_, a: string, b: string) => String(Math.round(Number(a) + (Number(b) - Number(a)) * fraction)))
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
@@ -123,22 +137,26 @@ export interface GearRequest {
   mainSkill: PlayerGem;
   /** Item classes to use instead of the default weapon choice, e.g. ["Staff"] or ["Wand", "Focus"]. */
   weapons?: string[];
+  /** budget (default): mid rolls, few mods. mid: good rolls, more mods. high: perfect rolls, full mods. */
+  tier?: GearTier;
 }
 
 export function assumeGear(data: GameData, req: GearRequest): AssumedItem[] {
   const itemLevel = Math.max(1, Math.min(req.level, 82));
+  const tier = TIER[req.tier ?? "budget"];
+  const roll = (text: string) => rollAt(text, tier.roll);
   const tag = armourTag(req.defence);
   const items: AssumedItem[] = [];
   const priorities = statPriorities(data, {
     terms: req.terms,
     avoid: req.avoid,
     slots: ["Wand", "Staff", "Sceptre", "Bow", "Crossbow", "One Hand Mace", "Two Hand Mace", "Spear", "Quarterstaff", "Talisman", "Focus", "Shield", "Quiver", "Helmet", "Body Armour", "Gloves", "Boots", "Amulet", "Ring", "Belt"],
-    perSlot: 3,
+    perSlot: 3 + tier.extraOffence,
     defence: req.defence,
     itemLevel,
   });
   const offence = (slot: string, n: number) =>
-    (priorities.offence.find((s) => s.slot === slot)?.mods ?? []).slice(0, n).flatMap((m) => midRoll(m.tier));
+    (priorities.offence.find((s) => s.slot === slot)?.mods ?? []).slice(0, n + tier.extraOffence).flatMap((m) => roll(m.tier));
 
   // Defence: the build's own layer plus resistances spread across items so all three get covered.
   const elements = ["Lightning", "Cold", "Fire"]; // four armour pieces: lightning, usually hardest to cap, gets two
@@ -147,17 +165,17 @@ export function assumeGear(data: GameData, req: GearRequest): AssumedItem[] {
     const element = elements[nextElement++ % elements.length]!;
     const family = modFamilies(data, slotClasses).find((f) => termPattern(`${element} Resistance`).test(f.bestTier) && !/all Elemental/i.test(f.bestTier));
     const advice = family && adviseFor(family, itemLevel);
-    return advice ? midRoll(advice.tier) : [];
+    return advice ? roll(advice.tier) : [];
   };
   const allResistances = (slotClasses: string[]) => {
     const family = modFamilies(data, slotClasses).find((f) => /to all Elemental Resistances/i.test(f.bestTier));
     const advice = family && adviseFor(family, itemLevel);
-    return advice ? midRoll(advice.tier) : resistance(slotClasses);
+    return advice ? roll(advice.tier) : resistance(slotClasses);
   };
   const layer = (slot: string) => {
     const mods = priorities.defence.find((s) => s.slot === slot)?.mods ?? [];
     const own = mods.find((m) => !/Resistance/i.test(m.tier));
-    return own ? midRoll(own.tier) : [];
+    return own ? roll(own.tier) : [];
   };
 
   // Weapons.
@@ -196,7 +214,8 @@ export function assumeGear(data: GameData, req: GearRequest): AssumedItem[] {
   for (const [slot, itemClass, offenceCount] of armour) {
     const base = pickBase(data, itemClass, itemLevel, tag) ?? pickBase(data, itemClass, itemLevel);
     if (!base) continue;
-    const mods = [...layer(slot), ...resistance([itemClass]), ...offence(slot, offenceCount)];
+    const extraResistances = Array.from({ length: tier.extraResistance }, () => resistance([itemClass])).flat();
+    const mods = [...layer(slot), ...resistance([itemClass]), ...extraResistances, ...offence(slot, offenceCount)];
     items.push({ slot, base: base.name, mods, raw: itemText(`Assumed ${slot}`, base.name, itemLevel, mods) });
   }
   const jewellery: [string, string, string, number][] = [

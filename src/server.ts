@@ -8,7 +8,19 @@ import { z } from "zod";
 import { defaultCacheDir, ensureData, readCachedManifest } from "./data/cache.js";
 import { loadGameData, type GameData, type PlayableClass } from "./data/gamedata.js";
 import { buildFileName, findBuildPlannerDir, INVENTORY_IDS, toBuildFile, writeBuildFile } from "./export/buildFile.js";
-import { flaskSuggestions, jewelSuggestions, spiritSuggestions } from "./gear/extras.js";
+import {
+  amuletSkillSuggestions,
+  anointSuggestions,
+  flaskSuggestions,
+  jewelSuggestions,
+  socketableSuggestions,
+  spiritSuggestions,
+  uniqueFlaskSuggestions,
+  type PriceLookup,
+} from "./gear/extras.js";
+import { DIVINE, formatPrice, getPrices, type PriceTable } from "./prices/exchange.js";
+import { itemPrices, priceLookup } from "./prices/lookup.js";
+import { itemClassOfBase, rareSearchLink, uniqueSearchLink } from "./prices/trade.js";
 import { DEFENCE_STYLES, SLOT_CLASSES, statPriorities, type DefenceStyle } from "./gear/priorities.js";
 import { findUniques } from "./gear/uniques.js";
 import { checkBuild } from "./build/checks.js";
@@ -26,7 +38,7 @@ import { completePassives } from "./tree/complete.js";
 import { findScaling } from "./tree/scaling.js";
 import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, withLevels } from "./tree/tree.js";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 const log = (message: string) => process.stderr.write(`[poe2-build-planner] ${message}\n`);
 
 const INSTRUCTIONS = `Tools for planning Path of Exile 2 builds (game version 0.5) for casual players.
@@ -45,7 +57,11 @@ League start: call leveling_phases and plan every phase, not just the end-game b
 
 To weigh two options (weapon choice, ascendancy, a key unique), use compare_builds instead of guessing.
 
-Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → evaluate_build (real numbers and a verdict per phase) → stat_priorities → suggest_extras (Spirit skills, jewels, flasks, charms) → find_uniques → export_build (ask the player first) → create_build_guide to lay it all out as a web page (ask first; it opens in their browser). For a league start, export one Build Planner file per phase whose setup differs (e.g. "Name - 1 Acts 1-2", "Name - 2 Acts 3-4", "Name - 3 Maps"), so the player can switch plans in game.
+Chase uniques (Mageblood, Headhunter and similar): only suggest them if the player has the budget or asks. Show what they add with compare_builds, with and without the unique in items (flasks are assumed, so Mageblood's effect counts; set flasksActive). Headhunter's stolen rare-monster mods can't be calculated, so describe them instead. Timeless jewels (Heroic Tragedy, Undying Hate) aren't calculated yet either: describe what they do and say the numbers leave them out. Give a trade_links search so the player can see the current price.
+
+Costs: item_prices has live prices for currency, runes, soul cores, Liquid Emotions, omens and other stackables. Uniques and rares aren't priced; give trade_links searches the player opens themselves. Budget/mid/high gear: evaluate_build's gearTier.
+
+Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → evaluate_build (real numbers and a verdict per phase) → stat_priorities → suggest_extras (Spirit skills, free-Spirit amulets, jewels, flasks and charms, anoints, runes and soul cores) → find_uniques → export_build (ask the player first) → create_build_guide to lay it all out as a web page (ask first; it opens in their browser). For a league start, export one Build Planner file per phase whose setup differs (e.g. "Name - 1 Acts 1-2", "Name - 2 Acts 3-4", "Name - 3 Maps"), so the player can switch plans in game.
 
 This tool isn't affiliated with or endorsed by Grinding Gear Games in any way.`;
 
@@ -71,6 +87,16 @@ function gameData() {
     throw error;
   });
   return dataPromise;
+}
+
+/** Currency Exchange prices, or why they aren't available (offline, no data this hour). */
+async function prices(data: GameData, league?: string): Promise<{ table?: PriceTable; lookup?: PriceLookup; error?: string }> {
+  try {
+    const table = await getPrices({ league });
+    return { table, lookup: priceLookup(data, table) };
+  } catch (error) {
+    return { error: `Prices unavailable: ${error instanceof Error ? error.message : String(error)}` };
+  }
 }
 
 const json = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
@@ -380,6 +406,35 @@ const buildSpec = {
     .optional()
     .describe("Specific items; each replaces the assumed item in its slot. Jewels go in the tree's allocated jewel sockets."),
   gear: z.enum(["budget", "none"]).optional(),
+  gearTier: z
+    .enum(["budget", "mid", "high"])
+    .optional()
+    .describe("Quality of the assumed rares: budget (default, mid rolls), mid (good rolls, more mods), high (perfect rolls, full mods)"),
+  anoint: z.string().optional().describe("Notable to anoint on the amulet (Liquid Emotions), e.g. \"Potent Incantation\""),
+  helmetInstill: z.string().optional().describe("Notable to instill on the helmet via a Raven-Touched Shard (level 60+, expensive)"),
+  socketables: z
+    .array(z.object({ slot: z.string().describe("Helmet, Body Armour, Gloves, Boots, Weapon 1, Weapon 2…"), names: z.array(z.string()) }))
+    .optional()
+    .describe("Runes, soul cores and idols to socket, by slot"),
+  amuletSkill: z
+    .string()
+    .optional()
+    .describe("A skill granted with no Spirit cost by a Lament, Portent or Absent Amulet (replaces the amulet), e.g. \"Herald of Ash\""),
+  flasks: z
+    .array(z.object({ unique: z.string().optional(), raw: z.string().optional(), slot: z.string().optional() }))
+    .optional()
+    .describe("Unique flasks and charms by name (or item text); plain life/mana flasks are assumed otherwise"),
+  flasksActive: z.boolean().optional().describe("Calculate with flasks active"),
+  weaponSwap: z
+    .object({
+      weapons: z.array(z.string()).optional().describe("Item classes for weapon set 2, e.g. [\"Bow\"]"),
+      items: z.array(z.object({ unique: z.string().optional(), raw: z.string().optional(), slot: z.string().optional() })).optional(),
+      passives: z.array(z.string()).optional().describe("Passives that only apply with weapon set 2"),
+      skills: z.array(z.object({ gemId: z.string(), supports: z.array(z.string()).optional() })).optional().describe("Skills used with weapon set 2"),
+      active: z.boolean().optional().describe("Calculate with weapon set 2 active"),
+    })
+    .optional()
+    .describe("Weapon swap: a second weapon set with its own passives and skills"),
 };
 type BuildSpec = z.infer<z.ZodObject<typeof buildSpec>>;
 
@@ -404,7 +459,29 @@ function toEvaluateInput(data: GameData, tree: PassiveTree, spec: BuildSpec) {
     gear:
       spec.gear === "none"
         ? { kind: "none" }
-        : { kind: "budget", terms, avoid: spec.avoid, defence: spec.defence?.length ? spec.defence : ["life"], weapons: spec.weapons },
+        : {
+            kind: "budget",
+            terms,
+            avoid: spec.avoid,
+            defence: spec.defence?.length ? spec.defence : ["life"],
+            weapons: spec.weapons,
+            tier: spec.gearTier,
+          },
+    extras: {
+      anoint: spec.anoint,
+      helmetInstill: spec.helmetInstill,
+      socketables: spec.socketables,
+      amuletSkill: spec.amuletSkill,
+      flasks: spec.flasks,
+      flasksActive: spec.flasksActive,
+      weaponSwap: spec.weaponSwap && {
+        weapons: spec.weaponSwap.weapons,
+        items: spec.weaponSwap.items,
+        passives: spec.weaponSwap.passives?.map((p) => resolveNode(tree, p)),
+        skills: spec.weaponSwap.skills?.map((s) => ({ gem: findGem(data, s.gemId), supports: s.supports?.map((id) => findGem(data, id)) })),
+        active: spec.weaponSwap.active,
+      },
+    },
   };
   return { input, skillIssues };
 }
@@ -432,7 +509,11 @@ server.registerTool(
       "minions. By default it assumes budget rare gear for that level (a few mid-roll mods per slot, based on `terms` and `defence`), " +
       "including a budget jewel in each allocated jewel socket; pass `items` to use specific uniques (by name) or pasted item text " +
       "in their slots (jewels too), or `gear: \"none\"` for no gear. Missing connecting passives are filled in (and listed), and " +
-      "\"+5 to any Attribute\" passives are spent where the gems and weapon need them. To compare options side by side, use " +
+      "\"+5 to any Attribute\" passives are spent where the gems and weapon need them. `gearTier` sets how good the assumed rares are " +
+      "(budget, mid or high). Extras: an amulet `anoint` and a helmet instill (`helmetInstill`, via a Raven-Touched Shard), runes, soul " +
+      "cores and idols (`socketables`), a skill from a Lament/Portent/Absent Amulet with no Spirit cost (`amuletSkill`), unique flasks and " +
+      "charms (`flasks`, with `flasksActive`), and a `weaponSwap` set with its own weapons, passives and skills. " +
+      "Timeless jewels (Heroic Tragedy, Undying Hate) aren't calculated by Path of Building for PoE2 yet. To compare options side by side, use " +
       "compare_builds. Numbers are estimates: assumed gear and heuristic bands, not guarantees. Windows only for now.",
     inputSchema: buildSpec,
     annotations: { readOnlyHint: true },
@@ -481,12 +562,16 @@ server.registerTool(
 server.registerTool(
   "suggest_extras",
   {
-    title: "Suggest Spirit skills, jewels, flasks and charms",
+    title: "Suggest Spirit skills, jewels, flasks, anoints, runes and more",
     description:
       "Suggestions beyond the main skill at a character level: persistent skills (auras, heralds, buffs) that fit the build and " +
-      "what they cost against the Spirit available by then (quests plus any gear Spirit you give), with a pick that fits; the best " +
-      "jewel type and its mods for the build, plus fitting unique jewels; and the best life and mana flask for the level, useful " +
-      "flask mods, and charms (with what triggers them).",
+      "what they cost against the Spirit available by then (quests plus any gear Spirit you give), with a pick that fits — and " +
+      "which ones a Lament, Portent or Absent Amulet grants with no Spirit cost (freeWithAmulet, and the amuletSkills section); the best " +
+      "jewel type and its mods, plus fitting unique jewels; the best life and mana flask for the level, useful flask mods, charms, and " +
+      "fitting unique flasks and charms; amulet anoints (notables and their Liquid Emotions recipe, with cost) and the helmet instill " +
+      "(a Raven-Touched Shard in the helmet allows a second notable); and runes, soul cores and idols per gear slot. Costs are in " +
+      "Exalted Orbs from the official Currency Exchange (last full hour) when it can be reached. Try any of these in evaluate_build " +
+      "(anoint, helmetInstill, socketables, amuletSkill, flasks).",
     inputSchema: {
       level: z.number().int().min(1).max(100),
       terms: z.array(z.string()).min(1).describe("What the build scales, e.g. [\"fire\", \"spell\", \"ignite\"]"),
@@ -495,13 +580,19 @@ server.registerTool(
       mainSkill: z.string().optional().describe("Main skill name (for the jewel type)"),
       gearSpirit: z.number().int().min(0).optional().describe("Spirit from gear, if any"),
       alreadyUsing: z.array(z.string()).optional().describe("Spirit skills already in the build"),
-      only: z.array(z.enum(["spirit", "jewels", "flasks"])).optional().describe("Default: all three"),
+      allocated: z.array(z.string()).optional().describe("Passives already in the tree (keys, ids or names), left out of anoints"),
+      socketSlots: z.array(z.string()).optional().describe("Slots for rune suggestions, e.g. [\"Body Armour\", \"Staff\"]. Default: armour slots"),
+      league: z.string().optional().describe("Trade league for prices. Default: the main league"),
+      only: z
+        .array(z.enum(["spirit", "jewels", "flasks", "anoints", "socketables", "amuletSkills"]))
+        .optional()
+        .describe("Default: all"),
     },
     annotations: { readOnlyHint: true },
   },
   async (args) =>
     run(async () => {
-      const { data } = await gameData();
+      const { data, tree } = await gameData();
       const query = {
         level: args.level,
         terms: args.terms,
@@ -511,11 +602,87 @@ server.registerTool(
         gearSpirit: args.gearSpirit,
         alreadyUsing: args.alreadyUsing,
       };
-      const want = new Set(args.only?.length ? args.only : ["spirit", "jewels", "flasks"]);
+      const want = new Set<string>(args.only?.length ? args.only : ["spirit", "jewels", "flasks", "anoints", "socketables", "amuletSkills"]);
+      const priced = want.has("anoints") || want.has("socketables") ? await prices(data, args.league) : {};
       return json({
         spirit: want.has("spirit") ? spiritSuggestions(data, query) : undefined,
+        amuletSkills: want.has("amuletSkills") ? amuletSkillSuggestions(data, query) : undefined,
         jewels: want.has("jewels") ? jewelSuggestions(data, query) : undefined,
-        flasksAndCharms: want.has("flasks") ? flaskSuggestions(data, query) : undefined,
+        flasksAndCharms: want.has("flasks") ? { ...flaskSuggestions(data, query), uniques: uniqueFlaskSuggestions(data, query).slice(0, 8) } : undefined,
+        anoints: want.has("anoints")
+          ? anointSuggestions(data, { ...query, allocated: args.allocated?.map((p) => resolveNode(tree, p)) }, priced.lookup)
+          : undefined,
+        socketables: want.has("socketables") ? socketableSuggestions(data, { ...query, slots: args.socketSlots }, priced.lookup) : undefined,
+        prices: priced.table ? { league: priced.table.league, hour: new Date(priced.table.hour * 1000).toISOString() } : priced.error,
+      });
+    }),
+);
+
+server.registerTool(
+  "item_prices",
+  {
+    title: "Prices of currency and stackable items",
+    description:
+      "Current prices from the official Currency Exchange (the last full hour) for stackable items: currency orbs, runes, soul cores, " +
+      "idols, Liquid Emotions, omens, catalysts, essences, the Raven-Touched Shard and so on. Prices are in Exalted Orbs (and Divine " +
+      "Orbs for expensive items), estimated from what actually traded. Uniques and rares aren't on the exchange: use trade_links.",
+    inputSchema: {
+      names: z.array(z.string()).min(1).max(50).describe("Item names, e.g. [\"Divine Orb\", \"Desert Rune\"]"),
+      league: z.string().optional().describe("Default: the main trade league"),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  async (args) =>
+    run(async () => {
+      const { data } = await gameData();
+      const table = await getPrices({ league: args.league });
+      return json({
+        league: table.league,
+        hour: new Date(table.hour * 1000).toISOString(),
+        divineOrb: formatPrice(table.exalted[DIVINE]),
+        prices: itemPrices(data, table, args.names),
+        otherLeagues: table.leagues.filter((l) => l !== table.league),
+      });
+    }),
+);
+
+server.registerTool(
+  "trade_links",
+  {
+    title: "Trade site search links",
+    description:
+      "Links to pre-filled searches on the official trade site that the player opens in their own browser (this tool never " +
+      "contacts the trade site). Rare items: give the slot or item class and the mods to look for (e.g. the assumed gear from " +
+      "evaluate_build or stat_priorities picks); each mod is searched at 80% of its value or better (`strictness`), cheapest first. " +
+      "Uniques: give names (e.g. Mageblood, Headhunter). Mods the trade site's stat list doesn't recognise are listed in leftOut. " +
+      "Share the links with the player; prices change constantly.",
+    inputSchema: {
+      league: z.string().optional().describe("Default: the main trade league (from the Currency Exchange; \"Standard\" if unreachable)"),
+      rares: z
+        .array(
+          z.object({
+            slot: z.string().describe("Slot or item class, e.g. Helmet, Ring, Staff, or a base type like \"Expert Hubris Circlet\""),
+            mods: z.array(z.string()).describe("Mod lines, e.g. \"+80 to maximum Life\", \"+30% to Fire Resistance\""),
+            maxLevel: z.number().int().min(1).max(100).optional().describe("Highest level requirement (the character's level)"),
+            strictness: z.number().min(0.1).max(1).optional(),
+          }),
+        )
+        .optional(),
+      uniques: z.array(z.string()).optional(),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) =>
+    run(async () => {
+      const { data } = await gameData();
+      const league = args.league ?? (await prices(data)).table?.league ?? "Standard";
+      return json({
+        league,
+        rares: (args.rares ?? []).map((r) => {
+          const itemClass = SLOT_CLASSES[r.slot]?.[0] ?? itemClassOfBase(data, r.slot) ?? r.slot;
+          return { slot: r.slot, ...rareSearchLink(data, { league, itemClass, mods: r.mods, maxLevel: r.maxLevel, strictness: r.strictness }) };
+        }),
+        uniques: (args.uniques ?? []).map((name) => ({ name, ...uniqueSearchLink(data, { league, name }) })),
       });
     }),
 );

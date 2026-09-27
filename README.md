@@ -59,9 +59,11 @@ The first start downloads about 30 MB of game data to `%APPDATA%\poe2-build-find
 | `plan_passive_tree` | Cheapest path to the chosen passives, with the level to take each point |
 | `leveling_phases` | League-start phases (acts, interludes, maps) with levels, checkpoints and quest rewards |
 | `check_build` | Checks a plan at a character level: skill availability, attribute and Spirit needs, passive budget |
-| `evaluate_build` | Path of Building numbers (damage, kill times, hits survived, resists) and a viability verdict at a level (Windows) |
+| `evaluate_build` | Path of Building numbers (damage, kill times, hits survived, resists) and a viability verdict at a level, with budget/mid/high gear, anoints, instills, runes, free-Spirit amulet skills, flasks and weapon swap (Windows) |
 | `compare_builds` | Two to four variants calculated the same way, side by side, with which is best for clearing, bossing and survival |
-| `suggest_extras` | Spirit skills (auras, heralds, buffs) that fit and cost, jewel type and mods, unique jewels, flasks and charms |
+| `suggest_extras` | Spirit skills that fit and cost (and which a Lament/Portent/Absent Amulet grants free), jewels, flasks and charms (unique ones too), amulet anoints and helmet instills (Raven-Touched Shard), runes, soul cores and idols per slot, with costs |
+| `item_prices` | Live prices from the official Currency Exchange for currency, runes, soul cores, Liquid Emotions, omens and other stackables |
+| `trade_links` | Pre-filled trade site searches for rares (slot + mods + level) and uniques, opened in the player's own browser |
 | `stat_priorities` | Offensive mods to look for per gear slot and on jewels, plus a defence baseline |
 | `find_uniques` | Uniques that fit the build, with current mods, level and where they drop (no prices — see below) |
 | `create_build_guide` | Writes a Maxroll-style guide page (phases, checks, quest rewards, highlighted passive tree, a Build Planner file per phase) and opens it |
@@ -70,7 +72,9 @@ The first start downloads about 30 MB of game data to `%APPDATA%\poe2-build-find
 
 Path of Building calculations run inside the extension on Windows (see [docs/engine.md](docs/engine.md)); they use assumed budget gear and heuristic verdict bands, so treat them as estimates.
 
-No unique prices: poe.ninja's API terms ask desktop apps to go through their own backend rather than calling it from players' machines, and this tool deliberately has no backend.
+Prices: stackable items (currency, runes, soul cores, Liquid Emotions, omens…) come from GGG's public Currency Exchange data. Uniques and rares aren't priced; `trade_links` gives trade site searches the player opens themselves (the tool never calls the trade site). poe.ninja's API terms ask desktop apps to go through their own backend, so unique prices from it are left for later.
+
+Not calculated yet: timeless jewels (Path of Building for PoE2 has no seed data for them) and Headhunter's stolen monster mods.
 
 `examples/Example - Fireball Infernalist.build` is a sample export. Copy it into `Documents/My Games/Path of Exile 2/BuildPlanner` to check that the game loads it.
 

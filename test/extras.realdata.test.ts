@@ -82,7 +82,7 @@ describe.skipIf(!hasCache || !enginePaths)("jewels and compare mode (engine)", (
       tree,
     };
     const assumed = await evaluateBuild(engine!, data, base);
-    expect(assumed.assumedGear.some((g) => g.slot === `Jewel ${socket}` && g.base === "Sapphire")).toBe(true);
+    expect(assumed.assumedGear.some((g) => g.slot === "Jewel socket" && g.base === "Sapphire")).toBe(true);
 
     const chosen = await evaluateBuild(engine!, data, { ...base, items: [{ raw: "Rarity: RARE\nMy Jewel\nRuby\n+40 to maximum Life", slot: "Jewel" }] });
     expect(chosen.itemsUsed.some((i) => /jewel socket/.test(i))).toBe(true);

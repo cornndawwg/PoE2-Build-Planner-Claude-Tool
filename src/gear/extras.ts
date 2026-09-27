@@ -22,6 +22,8 @@ export interface SpiritOption {
   tags: string[];
   description: string;
   matched: string[];
+  /** A Lament/Portent/Absent Amulet that grants this skill with no Spirit cost. */
+  freeWithAmulet?: string;
 }
 
 export interface ExtrasQuery {
@@ -57,7 +59,8 @@ export function spiritSuggestions(data: GameData, q: ExtrasQuery) {
     if (avoid.some((re) => re.test(description))) continue;
     const haystack = new Set([...gem.tags.map(norm), ...(skill?.active_skill?.types ?? []).map(norm)]);
     const matched = terms.filter(([, n, re]) => haystack.has(n) || re.test(description)).map(([t]) => t);
-    options.push({ name: gem.name, gemId: gem.gameId, spirit, availableFromLevel: from, source: gem.source, tags: gem.tags, description, matched });
+    const freeWith = data.skillAmuletBases.find((b) => b.skills.some((n) => n.toLowerCase() === gem.name.toLowerCase()));
+    options.push({ name: gem.name, gemId: gem.gameId, spirit, availableFromLevel: from, source: gem.source, tags: gem.tags, description, matched, freeWithAmulet: freeWith && `${freeWith.name} (level ${freeWith.level}, ${freeWith.cost.join(", ")})` });
   }
   options.sort((a, b) => b.matched.length - a.matched.length || a.spirit - b.spirit || a.name.localeCompare(b.name));
 
@@ -136,4 +139,128 @@ export function flaskSuggestions(data: GameData, q: ExtrasQuery) {
     charms: charms.slice(0, 6),
     charmNote: "Charms fire automatically on their trigger. You start with one charm slot; more come from gear (belts) and a quest choice in Act 2.",
   };
+}
+
+// --- Anoints, socketables, free-Spirit amulets, unique flasks and charms ---
+
+/** Prices by item name in Exalted Orbs, when exchange data is available. */
+export type PriceLookup = (name: string) => number | undefined;
+
+/** Recipe token ("ConcentratedLiquidSuffering") → item name ("Concentrated Liquid Suffering"). */
+const emotionName = (token: string) => token.replace(/([a-z])([A-Z])/g, "$1 $2");
+
+export function anointSuggestions(
+  data: GameData,
+  q: ExtrasQuery & { allocated?: string[] },
+  price?: PriceLookup,
+) {
+  const allocated = new Set(q.allocated ?? []);
+  const patterns = q.terms.map((t) => [t, termPattern(t)] as const);
+  const avoid = (q.avoid ?? []).map(termPattern);
+  const results = [...data.nodes]
+    .filter(([key, n]) => n.isNotable && !n.ascendancyId && (n as { recipe?: string[] }).recipe?.length && !allocated.has(key))
+    .map(([, n]) => {
+      const stats = (n.stats ?? []).map(stripMarkup);
+      const text = [n.name ?? "", ...stats].join("\n");
+      const recipe = ((n as { recipe?: string[] }).recipe ?? []).map(emotionName);
+      const costs = recipe.map((r) => price?.(r));
+      const cost = costs.every((c) => c !== undefined) ? costs.reduce((a, b) => a! + b!, 0) : undefined;
+      return { notable: n.name ?? "", stats, recipe, costExalted: cost === undefined ? undefined : Math.round(cost * 10) / 10, matched: patterns.filter(([, re]) => re.test(text)).map(([t]) => t), avoided: avoid.some((re) => re.test(text)) };
+    })
+    .filter((a) => a.matched.length > 0 && !a.avoided)
+    .sort((a, b) => b.matched.length - a.matched.length || (a.costExalted ?? 1e9) - (b.costExalted ?? 1e9));
+  const shard = price?.("Raven-Touched Shard");
+  return {
+    amulet: results.slice(0, 8).map(({ avoided, ...r }) => r),
+    helmetInstill: {
+      how: "Socket a Raven-Touched Shard in the helmet (level 60+) to instill a second notable the same way.",
+      shardCostExalted: shard === undefined ? undefined : Math.round(shard),
+    },
+    note: "Anoints use three Liquid Emotions (the recipe). Prefer notables the tree can't reach cheaply, or ones that save several points.",
+  };
+}
+
+/** Which socketable keys apply to a gear slot. */
+const SOCKET_KEYS: Record<string, string[]> = {
+  Helmet: ["helmet", "armour"],
+  "Body Armour": ["body armour", "armour"],
+  Gloves: ["gloves", "armour"],
+  Boots: ["boots", "armour"],
+  Shield: ["shield", "armour"],
+  Focus: ["focus", "caster"],
+  Wand: ["wand", "caster", "martial weapon wand or staff"],
+  Staff: ["staff", "caster", "martial weapon wand or staff"],
+  Sceptre: ["sceptre", "caster"],
+  Bow: ["bow", "weapon", "martial weapon wand or staff"],
+  Crossbow: ["crossbow", "weapon", "martial weapon wand or staff"],
+  "One Hand Mace": ["one hand mace", "weapon", "martial weapon wand or staff"],
+  "Two Hand Mace": ["two hand mace", "weapon", "martial weapon wand or staff"],
+  Spear: ["spear", "weapon", "martial weapon wand or staff"],
+  Quarterstaff: ["quarterstaff", "weapon", "martial weapon wand or staff"],
+  Talisman: ["talisman", "weapon", "martial weapon wand or staff"],
+};
+
+export function socketableSuggestions(data: GameData, q: ExtrasQuery & { slots?: string[] }, price?: PriceLookup) {
+  const patterns = q.terms.map((t) => [t, termPattern(t)] as const);
+  const defence = q.defence.map((d) => termPattern(d === "life" ? "maximum life" : d));
+  const avoid = (q.avoid ?? []).map(termPattern);
+  const slots = q.slots ?? ["Helmet", "Body Armour", "Gloves", "Boots"];
+  return slots.map((slot) => {
+    const keys = SOCKET_KEYS[slot] ?? [];
+    const options = data.socketables
+      .filter((s) => s.levelReq <= q.level && s.type !== "CongealedMist")
+      .flatMap((s) => {
+        const mods = keys.flatMap((k) => s.mods[k] ?? []);
+        if (!mods.length) return [];
+        const text = mods.join("\n");
+        if (avoid.some((re) => re.test(text))) return [];
+        const matched = [...patterns.filter(([, re]) => re.test(text)).map(([t]) => t), ...(defence.some((re) => re.test(text)) ? ["defence"] : [])];
+        if (!matched.length) return [];
+        const cost = price?.(s.name);
+        return [{ name: s.name, type: s.type, levelReq: s.levelReq, mods, matched, costExalted: cost === undefined ? undefined : Math.round(cost * 10) / 10 }];
+      })
+      .sort((a, b) => b.matched.length - a.matched.length || (a.costExalted ?? 1e9) - (b.costExalted ?? 1e9));
+    return { slot, options: options.slice(0, 6) };
+  });
+}
+
+export function amuletSkillSuggestions(data: GameData, q: ExtrasQuery) {
+  const patterns = q.terms.map((t) => termPattern(t));
+  return data.skillAmuletBases.flatMap((base) =>
+    base.skills.flatMap((skillName) => {
+      let gem: PlayerGem | undefined;
+      try {
+        gem = findGemByName(data, skillName);
+      } catch {
+        gem = undefined;
+      }
+      const skill = gem ? skillOf(data, gem) : undefined;
+      const spirit = skill?.static?.reservations?.spirit;
+      const text = [skillName, ...(gem?.tags ?? []), stripMarkup(skill?.active_skill?.description ?? "")].join(" ");
+      const matches = patterns.filter((re) => re.test(text)).length;
+      return matches > 0 && base.level <= q.level
+        ? [{ amulet: base.name, level: base.level, cost: base.cost, skill: skillName, spiritSaved: spirit, matches }]
+        : [];
+    }),
+  ).sort((a, b) => b.matches - a.matches || (b.spiritSaved ?? 0) - (a.spiritSaved ?? 0)).slice(0, 8);
+}
+
+function findGemByName(data: GameData, name: string): PlayerGem {
+  const gem = [...data.playerGems.values()].find((g) => g.name.toLowerCase() === name.toLowerCase());
+  if (!gem) throw new Error(`no gem ${name}`);
+  return gem;
+}
+
+export function uniqueFlaskSuggestions(data: GameData, q: ExtrasQuery) {
+  const patterns = q.terms.map((t) => [t, termPattern(t)] as const);
+  return data.uniques
+    .filter((u) => ["LifeFlask", "ManaFlask", "UtilityFlask"].includes(u.itemClass ?? "") && (u.requiredLevel ?? 0) <= q.level)
+    .map((u) => ({
+      name: u.name,
+      kind: u.itemClass === "UtilityFlask" ? "charm" : u.itemClass === "ManaFlask" ? "mana flask" : "life flask",
+      base: u.baseType,
+      mods: u.mods,
+      matched: patterns.filter(([, re]) => re.test(u.mods.join("\n"))).map(([t]) => t),
+    }))
+    .sort((a, b) => b.matched.length - a.matched.length);
 }

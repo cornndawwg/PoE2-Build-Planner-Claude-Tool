@@ -120,7 +120,10 @@ function methods.evaluate(p)
   -- "+5 to any Attribute" nodes: { [nodeId] = 1 (Strength) | 2 (Dexterity) | 3 (Intelligence) }.
   for id, choice in pairs(p.attributes or {}) do build.spec:SwitchAttributeNode(tonumber(id), tonumber(choice)) end
   local overrides = build.spec.hashOverrides or {}
-  build.spec:ImportFromNodeList(p.className, nil, nil, nil, hashes, {}, overrides, {}, nil)
+  -- Weapon-set passives: { [nodeId] = 1 | 2 }; others apply to both sets.
+  local weaponSets = {}
+  for id, set in pairs(p.weaponSets or {}) do weaponSets[tonumber(id)] = tonumber(set) end
+  build.spec:ImportFromNodeList(p.className, nil, nil, nil, hashes, weaponSets, overrides, {}, nil)
   local allocated = 0
   for _ in pairs(build.spec.allocNodes) do allocated = allocated + 1 end
 
@@ -157,10 +160,23 @@ function methods.evaluate(p)
       if not raw then notes[#notes + 1] = "Path of Building has no unique called '" .. item.unique .. "'" end
     end
     if raw then
+      -- specLines (e.g. "Sockets: S S", "Rune: Desert Rune") go right under the base type line;
+      -- extraLines (e.g. "Allocates Potent Incantation") are added as mods at the end.
+      if item.specLines and #item.specLines > 0 then
+        local lines = {}
+        for line in (raw .. "\n"):gmatch("([^\r\n]*)\r?\n") do lines[#lines + 1] = line end
+        local at = math.min(3, #lines)
+        for i = #item.specLines, 1, -1 do table.insert(lines, at + 1, item.specLines[i]) end
+        raw = table.concat(lines, "\n")
+      end
+      if item.extraLines and #item.extraLines > 0 then raw = raw .. "\n" .. table.concat(item.extraLines, "\n") end
       local err = equip(raw, item.slot)
       if err then notes[#notes + 1] = err end
     end
   end
+
+  -- Calculate with the second weapon set active (weapon swap).
+  if p.useWeaponSet2 then build.itemsTab.activeItemSet.useSecondWeaponSet = true end
 
   for _, text in ipairs(p.skills or {}) do build.skillsTab:PasteSocketGroup(text) end
   local groups = build.skillsTab.socketGroupList

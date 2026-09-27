@@ -6,7 +6,8 @@ import type { DefenceStyle } from "../gear/priorities.js";
 import { gemLevelForCharacter } from "../skills/levels.js";
 import { completePassives } from "../tree/complete.js";
 import type { PassiveTree } from "../tree/tree.js";
-import { assumeGear, assumeJewel, JEWEL_FOR_ATTRIBUTE, mainAttribute, type AssumedItem } from "./gear.js";
+import { assumeGear, assumeJewel, JEWEL_FOR_ATTRIBUTE, mainAttribute, type AssumedItem, type GearTier } from "./gear.js";
+import { applyItemExtras, type ItemExtras } from "./itemExtras.js";
 import type { PobEngine } from "./pob.js";
 import { verdict, type Verdict } from "./verdict.js";
 
@@ -30,13 +31,15 @@ export interface EvaluateInput {
   mainSkill?: number;
   gear:
     | { kind: "none" }
-    | { kind: "budget"; terms: string[]; avoid?: string[]; defence: DefenceStyle[]; weapons?: string[] };
+    | { kind: "budget"; terms: string[]; avoid?: string[]; defence: DefenceStyle[]; weapons?: string[]; tier?: GearTier };
   /** Specific items (uniques or pasted text); they replace the assumed item in their slot. */
   items?: ItemChoice[];
   /** Gem quality to assume (default: 0 in the campaign, 20 at level 65+). */
   quality?: number;
   /** Needed to fill in missing connecting passives and spend "+5 to any Attribute" nodes. */
   tree?: PassiveTree;
+  /** Anoint, helmet instill, socketables, free-Spirit amulet skill, flasks, weapon swap. */
+  extras?: ItemExtras;
 }
 
 interface PobResult {
@@ -113,6 +116,8 @@ export interface Evaluation {
     flexibleNodes: { str: number; dex: number; int: number };
   };
   passives: { allocated: number; addedToConnect: string[]; unreachable: string[] };
+  /** Skill groups Path of Building calculated (including skills granted by items). */
+  skillGroups: string[];
   assumedGear: { slot: string; base: string; mods: string[] }[];
   itemsUsed: string[];
   notes: string[];
@@ -168,7 +173,8 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
   let addedToConnect: string[] = [];
   let unreachable: string[] = [];
   if (input.tree) {
-    const completed = completePassives(input.tree, input.cls.startNode, input.passives, input.ascendancyId);
+    const swapPassives = input.extras?.weaponSwap?.passives ?? [];
+    const completed = completePassives(input.tree, input.cls.startNode, [...input.passives, ...swapPassives], input.ascendancyId);
     passives = [...completed.main, ...completed.ascendancy];
     addedToConnect = completed.added;
     unreachable = completed.unreachable;
@@ -177,9 +183,13 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
   }
 
   // Gear: assumed budget rares, with chosen items replacing their slots.
+  const gearRequest =
+    input.gear.kind === "budget"
+      ? { level, terms: input.gear.terms, avoid: input.gear.avoid, defence: input.gear.defence, mainSkill: main, weapons: input.gear.weapons, tier: input.gear.tier }
+      : undefined;
   let assumed: AssumedItem[] = [];
   if (input.gear.kind === "budget") {
-    assumed = assumeGear(data, { level, terms: input.gear.terms, avoid: input.gear.avoid, defence: input.gear.defence, mainSkill: main, weapons: input.gear.weapons });
+    assumed = assumeGear(data, gearRequest!);
   }
   // Jewel sockets the tree actually takes; jewels go in these, in order.
   const sockets = input.tree ? passives.filter((k) => input.tree!.nodes.get(k)?.isJewelSocket) : [];
@@ -214,7 +224,14 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
       if (jewel) remainingAssumed.push({ ...jewel, slot: `Jewel ${socket}` });
     }
   }
-  const items = [...remainingAssumed.map((a) => ({ raw: a.raw, slot: a.slot })), ...chosen];
+  const baseItems = [...remainingAssumed.map((a) => ({ raw: a.raw, slot: a.slot })), ...chosen];
+  const extrasResult = applyItemExtras(data, input.tree, level, gemLevel, baseItems, input.extras ?? {}, gearRequest);
+  const items = extrasResult.items;
+  // Items the extras added: flasks, the free-Spirit amulet, weapon swap.
+  for (const item of items.filter((i) => !baseItems.includes(i))) {
+    itemsUsed.push(`${item.unique ?? item.raw?.split(/\r?\n/).slice(1).find((l) => !/^Assumed /.test(l)) ?? "item"} (${item.slot})`);
+  }
+  notes.push(...extrasResult.notes);
 
   const skillTexts = input.skills.map(({ gem, supports }) =>
     [`${gem.name} ${gemLevel}/${quality}  1`, ...(supports ?? []).map((s) => `${s.name} 1/0  1`)].join("\n") + "\n",
@@ -224,10 +241,12 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
     level,
     passives,
     attributes,
-    skills: skillTexts,
+    weaponSets: extrasResult.weaponSets,
+    useWeaponSet2: extrasResult.useWeaponSet2,
+    skills: [...skillTexts, ...extrasResult.swapSkillTexts],
     mainSkill: mainIndex + 1,
     items,
-    config: { enemyIsBoss, enemyLevel: areaLevel, resistancePenalty: resistancePenalty(level), questsUpToLevel: level },
+    config: { enemyIsBoss, enemyLevel: areaLevel, resistancePenalty: resistancePenalty(level), questsUpToLevel: level, ...extrasResult.config },
   });
 
   // Spend "+5 to any Attribute" passives where Path of Building says attributes are short
@@ -345,10 +364,23 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
     },
     survival: { hitsFromNormal, hitsFromBoss, maxHit: round(s.SecondMinimalMaximumHitTaken) },
     verdicts,
-    resources: { mana: round(s.Mana), manaUnreserved: round(s.ManaUnreserved), spirit: round(s.Spirit), spiritUnreserved: round(s.SpiritUnreserved) },
+    resources: {
+      mana: round(s.Mana),
+      manaUnreserved: round(s.ManaUnreserved),
+      spirit: round(s.Spirit),
+      // Path of Building sometimes still reserves Spirit for a free amulet skill; give back only
+      // what it actually reserved, never more than the total.
+      spiritUnreserved:
+        s.SpiritUnreserved === undefined
+          ? undefined
+          : Math.round(s.SpiritUnreserved + Math.min(extrasResult.spiritRefund, Math.max(0, (s.Spirit ?? 0) - s.SpiritUnreserved))),
+    },
     attributes: { str: s.Str, dex: s.Dex, int: s.Int, required: { str: s.ReqStr, dex: s.ReqDex, int: s.ReqInt }, flexibleNodes: flexible },
     passives: { allocated: clearRun.allocatedPassives, addedToConnect, unreachable },
-    assumedGear: remainingAssumed.map(({ slot, base, mods }) => ({ slot, base, mods })),
+    skillGroups: clearRun.skills.map((g) => g.label ?? g.gems.map((x) => x.name).join(" + ")),
+    assumedGear: remainingAssumed
+      .filter((a) => items.some((i) => i.slot === a.slot && i.raw === a.raw))
+      .map(({ slot, base, mods }) => ({ slot: slot.startsWith("Jewel ") ? "Jewel socket" : slot, base, mods })),
     itemsUsed,
     notes,
   };

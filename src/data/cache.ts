@@ -116,7 +116,8 @@ async function ensureOne(
   // Validate before replacing a good cached copy with a broken download.
   const text = body.toString("utf8");
   if (source.format === "json") JSON.parse(text);
-  else parseLuaData(text);
+  else if (source.format === "lua") parseLuaData(text);
+  else if (!text.trim()) throw new Error("empty file");
   await writeFile(`${path}.tmp`, body);
   await rename(`${path}.tmp`, path);
 

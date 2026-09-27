@@ -72,6 +72,20 @@ const evaluation = JSON.parse(
 );
 if (evaluation.available && !(evaluation.clear?.dps > 0)) process.exitCode = 1;
 await call("suggest_extras", { level: 45, terms: ["fire", "spell", "ignite"], avoid: ["attack"], defence: ["energy shield"], mainSkill: "Fireball" });
+await call("evaluate_build", {
+  class: "Infernalist",
+  level: 65,
+  passives: [],
+  skills: [{ gemId: "Fireball" }],
+  terms: ["fire", "spell"],
+  gearTier: "mid",
+  anoint: "Potent Incantation",
+  socketables: [{ slot: "Body Armour", names: ["Desert Rune"] }],
+  amuletSkill: "Herald of Ash",
+  weaponSwap: { weapons: ["Bow"], skills: [{ gemId: "Lightning Arrow" }] },
+});
+await call("item_prices", { names: ["Divine Orb", "Desert Rune", "Raven-Touched Shard"] });
+await call("trade_links", { rares: [{ slot: "Helmet", mods: ["+80 to maximum Life", "+30% to Fire Resistance"], maxLevel: 65 }], uniques: ["Mageblood"] });
 const comparison = JSON.parse(
   await call("compare_builds", {
     variants: [
