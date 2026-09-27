@@ -33,15 +33,16 @@ for (const c of data.classes) {
   console.log(`  ${c.name.padEnd(10)} start ${c.startNode.padEnd(6)} ${c.ascendancies.map((a) => a.name).join(", ")}`);
 }
 
-const gems = [...data.gems.values()];
-const byType = new Map<string, number>();
-for (const g of gems) byType.set(g.gem_type, (byType.get(g.gem_type) ?? 0) + 1);
-console.log(`\nGems (released): ${gems.length} — ${[...byType].map(([t, n]) => `${t} ${n}`).join(", ")}`);
+const gems = [...data.playerGems.values()];
+const tally = new Map<string, number>();
+for (const g of gems) tally.set(`${g.kind}/${g.source}`, (tally.get(`${g.kind}/${g.source}`) ?? 0) + 1);
+console.log(`\nPlayer gems: ${gems.length} (of ${data.gems.size} RePoE entries)`);
+console.log(`  ${[...tally].sort().map(([k, n]) => `${k} ${n}`).join(", ")}`);
 
-const fireball = data.gems.get("Metadata/Items/Gem/SkillGemFireball");
-const fireballSkill = fireball?.grants_skills?.[0] ? data.skills[fireball.grants_skills[0]] : undefined;
+const fireball = data.playerGems.get("Metadata/Items/Gem/SkillGemFireball");
+const fireballSkill = fireball ? data.skills[fireball.grantedEffectId] : undefined;
 if (fireball && fireballSkill?.active_skill) {
-  console.log(`  Sample: ${fireball.base_item.display_name} — tags [${fireball.tags?.join(", ")}]`);
+  console.log(`  Sample: ${fireball.name} (tier ${fireball.tier}) — tags [${fireball.tags.join(", ")}]`);
   console.log(`          types [${fireballSkill.active_skill.types.join(", ")}]`);
   console.log(`          ${stripMarkup(fireballSkill.active_skill.description ?? "")}`);
 }

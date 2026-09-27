@@ -77,13 +77,16 @@ export interface Skill {
     display_name: string;
     description?: string;
     types: string[];
+    /** Types of the minion's skills, for minion skills. */
+    minion_types?: string[];
+    /** Always empty in the PoE2 RePoE export — weapon requirements have to come from elsewhere. */
     weapon_restrictions?: string[];
   };
   support_gem?: {
     /** Postfix (RPN) boolean expressions over skill types, e.g. ["A", "B", "AND", "NOT"]. */
-    allowed_types: string[];
-    excluded_types: string[];
-    added_types: string[];
+    allowed_types?: string[];
+    excluded_types?: string[];
+    added_types?: string[];
     supports_gems_only?: boolean;
   };
 }

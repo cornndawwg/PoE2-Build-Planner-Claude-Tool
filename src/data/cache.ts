@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { parseLuaData } from "./lua.js";
 import { SOURCES, SOURCE_KEYS, type SourceKey } from "./sources.js";
 
 const USER_AGENT = "poe2-build-planner-claude-tool/0.0.1";
@@ -113,7 +114,9 @@ async function ensureOne(
 
   const body = Buffer.from(await response.arrayBuffer());
   // Validate before replacing a good cached copy with a broken download.
-  JSON.parse(body.toString("utf8"));
+  const text = body.toString("utf8");
+  if (source.format === "json") JSON.parse(text);
+  else parseLuaData(text);
   await writeFile(`${path}.tmp`, body);
   await rename(`${path}.tmp`, path);
 

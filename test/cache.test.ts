@@ -18,7 +18,10 @@ function fakeFetch(handler: (url: string, headers: Record<string, string>) => Re
 }
 
 const ok = (url: string) =>
-  new Response(JSON.stringify({ from: url }), { status: 200, headers: { etag: `"v1-${url.length}"` } });
+  new Response(url.endsWith(".lua") ? `return { from = "${url}" }` : JSON.stringify({ from: url }), {
+    status: 200,
+    headers: { etag: `"v1-${url.length}"` },
+  });
 
 describe("ensureData", () => {
   let dir: string;
@@ -73,7 +76,7 @@ describe("ensureData", () => {
     await expect(ensureData({ cacheDir: dir, fetchImpl: offline })).rejects.toThrow(/Could not download/);
   });
 
-  it("keeps the old file when a download is not valid JSON", async () => {
+  it("keeps the old file when a download is not valid", async () => {
     await ensureData({ cacheDir: dir, fetchImpl: fakeFetch(ok).impl });
     const broken = fakeFetch(() => new Response("<html>oops</html>", { status: 200 }));
     await expect(ensureData({ cacheDir: dir, fetchImpl: broken.impl, force: true })).rejects.toThrow();

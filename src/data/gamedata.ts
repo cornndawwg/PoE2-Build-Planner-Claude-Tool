@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { defaultCacheDir } from "./cache.js";
+import { parseLuaData } from "./lua.js";
 import { SOURCES } from "./sources.js";
 import type { BaseItem, Mod, Skill, SkillGem, TreeExport, TreeNode } from "./types.js";
 
@@ -22,12 +23,37 @@ export interface PlayableClass {
   ascendancies: PlayableAscendancy[];
 }
 
+/** How a player gets a skill or support. */
+export type GemSource =
+  | "uncut-gem" // cut from an uncut skill/support/spirit gem
+  | "item" // granted by an item (weapon/shield/sceptre base or a unique)
+  | "lineage" // lineage support: rare drop
+  | "special"; // other supports that don't come from uncut gems
+
+/** A gem a player can use, from Path of Building's curated list joined with RePoE. */
+export interface PlayerGem {
+  /** The game's metadata id (exact Gem/ vs Gems/ spelling), as used in .build files. */
+  gameId: string;
+  name: string;
+  kind: "active" | "support" | "spirit";
+  source: GemSource;
+  /** PoB "Tier": 0 for non-uncut gems; higher tiers unlock later. */
+  tier: number;
+  /** Weapon types the skill needs, e.g. ["One Hand Mace", "Two Hand Mace"]. Empty = no requirement. */
+  weaponRequirements: string[];
+  tags: string[];
+  grantedEffectId: string;
+  gem: SkillGem;
+}
+
 export interface GameData {
   /** Keyed by skill hash (string), as in the tree export. */
   nodes: Map<string, TreeNode>;
   classes: PlayableClass[];
-  /** Released gems, keyed by metadata id. */
+  /** All released gems from RePoE, keyed by metadata id. Includes test and internal entries. */
   gems: Map<string, SkillGem>;
+  /** Gems players can actually use, keyed by gameId. Use this for anything player-facing. */
+  playerGems: Map<string, PlayerGem>;
   skills: Record<string, Skill>;
   baseItems: Record<string, BaseItem>;
   mods: Record<string, Mod>;
@@ -67,23 +93,66 @@ export function playableClasses(tree: Pick<TreeExport, "classes" | "nodes">): Pl
   });
 }
 
+interface PobGemEntry {
+  name: string;
+  gameId: string;
+  grantedEffectId: string;
+  Tier: number;
+  weaponRequirements?: string;
+  tags?: Record<string, boolean>;
+}
+
+/**
+ * Join Path of Building's gem list (which leaves out test, placeholder and weapon-default
+ * entries) with RePoE's gem data. Entries without a RePoE match or a skill are dropped.
+ */
+export function buildPlayerGems(
+  pobGems: Record<string, PobGemEntry>,
+  gems: Map<string, SkillGem>,
+  skills: Record<string, Skill>,
+): Map<string, PlayerGem> {
+  const result = new Map<string, PlayerGem>();
+  for (const entry of Object.values(pobGems)) {
+    const gem = gems.get(entry.gameId);
+    if (!gem || !skills[entry.grantedEffectId]) continue;
+    const kind = gem.gem_type === "support" ? "support" : gem.gem_type === "spirit" ? "spirit" : "active";
+    const source: GemSource =
+      entry.Tier > 0 ? "uncut-gem" : kind !== "support" ? "item" : gem.is_lineage ? "lineage" : "special";
+    result.set(entry.gameId, {
+      gameId: entry.gameId,
+      name: entry.name,
+      kind,
+      source,
+      tier: entry.Tier,
+      weaponRequirements: (entry.weaponRequirements ?? "").split(",").map((w) => w.trim()).filter(Boolean),
+      tags: Object.keys(entry.tags ?? {}).filter((t) => t !== "grants_active_skill"),
+      grantedEffectId: entry.grantedEffectId,
+      gem,
+    });
+  }
+  return result;
+}
+
 export async function loadGameData(cacheDir: string = defaultCacheDir()): Promise<GameData> {
-  const [tree, gems, skills, baseItems, mods] = await Promise.all([
+  const [tree, gems, skills, baseItems, mods, pobGemsSrc] = await Promise.all([
     readJson<TreeExport>(cacheDir, SOURCES.tree.file),
     readJson<Record<string, SkillGem>>(cacheDir, SOURCES.skillGems.file),
     readJson<Record<string, Skill>>(cacheDir, SOURCES.skills.file),
     readJson<Record<string, BaseItem>>(cacheDir, SOURCES.baseItems.file),
     readJson<Record<string, Mod>>(cacheDir, SOURCES.mods.file),
+    readFile(join(cacheDir, SOURCES.pobGems.file), "utf8"),
   ]);
 
   const releasedGems = new Map(
     Object.entries(gems).filter(([, gem]) => gem.base_item.release_state === "released"),
   );
+  const pobGems = parseLuaData(pobGemsSrc) as unknown as Record<string, PobGemEntry>;
 
   return {
     nodes: new Map(Object.entries(tree.nodes)),
     classes: playableClasses(tree),
     gems: releasedGems,
+    playerGems: buildPlayerGems(pobGems, releasedGems, skills),
     skills,
     baseItems,
     mods,
