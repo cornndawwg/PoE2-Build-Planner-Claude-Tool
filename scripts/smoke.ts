@@ -1,5 +1,5 @@
 // End-to-end check: start the MCP server over stdio like Claude Desktop does, then call each tool.
-// Usage: npm run smoke   (or SMOKE_DIST=1 npm run smoke after npm run build)
+// Usage: npm run smoke   (or SMOKE_SERVER=dist/server.js npm run smoke after npm run build)
 
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,8 +11,8 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const exportDir = mkdtempSync(join(tmpdir(), "poe2bf-smoke-"));
 const transport = new StdioClientTransport({
   command: process.execPath,
-  // SMOKE_DIST=1 tests the compiled build that Claude Desktop runs.
-  args: process.env.SMOKE_DIST ? ["dist/server.js"] : ["--import", "tsx", "src/server.ts"],
+  // SMOKE_SERVER=<path to server.js> tests a compiled build (dist/ or an unpacked .mcpb).
+  args: process.env.SMOKE_SERVER ? [process.env.SMOKE_SERVER] : ["--import", "tsx", "src/server.ts"],
   stderr: "inherit",
   env: { ...(process.env as Record<string, string>), POE2BF_BUILDPLANNER_DIR: exportDir },
 });

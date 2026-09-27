@@ -13,9 +13,11 @@
     "test": "vitest run",
     "data:summary": "tsx scripts/data-summary.ts",
     "smoke": "tsx scripts/smoke.ts",
-    "start": "tsx src/server.ts"
+    "start": "tsx src/server.ts",
+    "package": "tsx scripts/package.ts"
   },
   "devDependencies": {
+    "@anthropic-ai/mcpb": "^2.1.2",
     "@types/node": "^26.6.3",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

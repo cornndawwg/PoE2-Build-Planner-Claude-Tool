@@ -1,0 +1,35 @@
+{
+  "manifest_version": "0.3",
+  "name": "poe2-build-planner",
+  "display_name": "PoE2 Build Planner",
+  "version": "0.0.1",
+  "description": "Turn a Path of Exile 2 play fantasy into a playable build: skills, supports, passive tree, leveling path, gear and jewel stats, and an in-game Build Planner file.",
+  "long_description": "Built for casual players. Tell Claude what you want to play and it uses these tools to pick a class and ascendancy, skills and compatible supports, plan the passive tree with the level to take each point, list the gear and jewel stats to look for, suggest fitting uniques, and write the plan into the game's Build Planner. Runs locally; on first start it downloads public game data (GGG's passive tree export, RePoE and Path of Building data, about 30 MB). This product isn't affiliated with or endorsed by Grinding Gear Games in any way.",
+  "author": {
+    "name": "PoE2 Build Planner"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/server.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/server.js"]
+    }
+  },
+  "tools": [
+    { "name": "list_classes", "description": "Classes and released ascendancies" },
+    { "name": "search_skills", "description": "Skills by tags, types and weapon" },
+    { "name": "compatible_supports", "description": "Supports that work with a skill, ranked with reasons" },
+    { "name": "find_passives", "description": "Passives that scale the build" },
+    { "name": "plan_passive_tree", "description": "Cheapest path to chosen passives with the level to take each point" },
+    { "name": "stat_priorities", "description": "Gear and jewel stats to look for" },
+    { "name": "find_uniques", "description": "Unique items that fit the build" },
+    { "name": "export_build", "description": "Write the build into the in-game Build Planner" },
+    { "name": "data_status", "description": "Cached game data info" }
+  ],
+  "keywords": ["path of exile 2", "poe2", "build planner", "passive tree", "gaming"],
+  "compatibility": {
+    "platforms": ["win32", "darwin"],
+    "runtimes": { "node": ">=20.0.0" }
+  }
+}

@@ -13,6 +13,14 @@ Built for casual players on a budget, not meta-chasers.
 - Uses Path of Building's calculation engine for damage and defence numbers.
 - Viability verdicts are **estimates**, not guarantees.
 
+## Install (players)
+
+1. Download `poe2-build-planner-<version>.mcpb` from the Releases page.
+2. Double-click it (or drag it into Claude Desktop → Settings → Extensions) and confirm the install.
+3. Start a new chat and describe the build you want to play.
+
+Works in the Claude desktop app on Windows and macOS. The first start downloads about 30 MB of public game data.
+
 ## Try it locally (developers)
 
 Needs Node 20+.
@@ -21,6 +29,7 @@ Needs Node 20+.
 npm install
 npm run build
 npm run smoke        # starts the server and calls every tool
+npm run package      # builds release/poe2-build-planner-<version>.mcpb
 ```
 
 Then add it to Claude Desktop's config (`%APPDATA%\Claude\claude_desktop_config.json` on Windows) and restart Claude Desktop:
