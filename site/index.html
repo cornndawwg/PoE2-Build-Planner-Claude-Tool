@@ -52,6 +52,14 @@ h1 em{font-style:normal;color:var(--accent2)}
 .cls h3{margin:0 0 2px;font-size:16px}
 .cls p{margin:0;color:var(--muted);font-size:14px}
 @media (max-width:860px){.classes{grid-template-columns:repeat(2,1fr)}}
+.roadmap{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.lane{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+.lane h3{margin:0 0 10px;font-size:17px;display:flex;align-items:center;gap:8px}
+.lane h3 .dot{width:10px;height:10px;border-radius:50%}
+.lane ul{margin:0;padding-left:18px;color:#c9c6bf;font-size:15px}
+.lane li{margin:6px 0}
+.lane li b{color:var(--text);font-weight:650}
+@media (max-width:860px){.roadmap{grid-template-columns:1fr}}
 .lead{font-size:19px;color:#cfccc4;margin:0 0 26px}
 .cta{display:flex;flex-wrap:wrap;gap:12px}
 .btn{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex-shrink:0;padding:12px 20px;border-radius:10px;font-weight:650;text-decoration:none;border:1px solid var(--line);color:var(--text);background:var(--panel2)}
@@ -110,6 +118,7 @@ footer p{margin:6px 0}
       <a href="#how">How it works</a>
       <a href="#features">Features</a>
       <a href="#classes">Classes</a>
+      <a href="#roadmap">Roadmap</a>
       <a href="#faq">FAQ</a>
       <a class="keep" href="#support">Support</a>
     </nav>
@@ -232,6 +241,39 @@ footer p{margin:6px 0}
         <li>It never touches the game client or your game account.</li>
       </ul>
     </div>
+  </div>
+</section>
+
+<section id="roadmap">
+  <div class="wrap">
+    <h2>Roadmap</h2>
+    <p class="sub">Where the tool is heading. No dates: it's a hobby project, and a missed promise is worse than none. <a href="https://github.com/cornndawwg/PoE2-Build-Planner-Claude-Tool/issues/new">Request a feature</a> or vote on existing requests on GitHub.</p>
+    <div class="roadmap">
+      <div class="lane">
+        <h3><span class="dot" style="background:var(--ok)"></span>Now</h3>
+        <ul>
+          <li><b>Public beta</b>: build planning, Path of Building numbers, honest goal checks, damage optimizer, leveling guides and Build Planner export.</li>
+          <li><b>Fixing what beta testers report.</b></li>
+        </ul>
+      </div>
+      <div class="lane">
+        <h3><span class="dot" style="background:var(--accent)"></span>Next</h3>
+        <ul>
+          <li><b>Updates each league</b>: fresh game data and Path of Building engine at every league launch.</li>
+          <li><b>Import your character</b>: paste a Path of Building code or your gear so Claude plans from your real items.</li>
+          <li><b>Path of Building numbers on macOS.</b></li>
+        </ul>
+      </div>
+      <div class="lane">
+        <h3><span class="dot" style="background:var(--blue)"></span>Later</h3>
+        <ul>
+          <li><b>Timeless jewel calculations</b>, once Path of Building for PoE2 supports them.</li>
+          <li><b>Shareable guide pages</b> to send your build to a friend.</li>
+          <li><b>Better "why is my character dying?"</b> diagnosis for existing characters.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="small" style="margin-top:14px">Last updated September 2026.</p>
   </div>
 </section>
 
