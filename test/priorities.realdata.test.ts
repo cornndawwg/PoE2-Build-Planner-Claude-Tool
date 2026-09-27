@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { defaultCacheDir } from "../src/data/cache.js";
 import { loadGameData, type GameData } from "../src/data/gamedata.js";
-import { SOURCES } from "../src/data/sources.js";
+import { ALL_SOURCES } from "../src/data/sources.js";
 import { statPriorities } from "../src/gear/priorities.js";
 
-const hasCache = Object.values(SOURCES).every((s) => existsSync(join(defaultCacheDir(), s.file)));
+const hasCache = Object.values(ALL_SOURCES).every((s) => existsSync(join(defaultCacheDir(), s.file)));
 
 describe.skipIf(!hasCache)("stat priorities against real data", () => {
   let data: GameData;

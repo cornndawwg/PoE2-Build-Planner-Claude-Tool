@@ -63,6 +63,20 @@ export const SOURCES = {
   },
 } as const satisfies Record<string, DataSource>;
 
-export type SourceKey = keyof typeof SOURCES;
+/** Path of Building's unique item files that hold wearable gear. */
+export const UNIQUE_FILES = [
+  "amulet", "belt", "body", "boots", "bow", "crossbow", "focus", "gloves", "helmet", "jewel",
+  "mace", "quiver", "ring", "sceptre", "shield", "spear", "staff", "talisman", "wand",
+] as const;
 
-export const SOURCE_KEYS = Object.keys(SOURCES) as SourceKey[];
+export const UNIQUE_SOURCES: Record<string, DataSource> = Object.fromEntries(
+  UNIQUE_FILES.map((name) => [
+    `uniques:${name}`,
+    { url: `${POB}Uniques/${name}.lua`, file: `pob_uniques_${name}.lua`, format: "lua", description: `Path of Building uniques (${name})` },
+  ]),
+);
+
+/** Everything the tool downloads, keyed by a short name. */
+export const ALL_SOURCES: Record<string, DataSource> = { ...SOURCES, ...UNIQUE_SOURCES };
+
+export const SOURCE_KEYS = Object.keys(ALL_SOURCES);

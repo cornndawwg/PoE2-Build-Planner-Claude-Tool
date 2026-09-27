@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseLuaData } from "./lua.js";
-import { SOURCES, SOURCE_KEYS, type SourceKey } from "./sources.js";
+import { ALL_SOURCES, SOURCE_KEYS } from "./sources.js";
 
 const USER_AGENT = "poe2-build-planner-claude-tool/0.0.1";
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -16,7 +16,7 @@ export interface ManifestEntry {
   bytes: number;
 }
 
-export type Manifest = Partial<Record<SourceKey, ManifestEntry>>;
+export type Manifest = Partial<Record<string, ManifestEntry>>;
 
 export type FetchLike = (url: string, init?: { headers?: Record<string, string> }) => Promise<Response>;
 
@@ -34,7 +34,7 @@ export interface EnsureOptions {
 export type EnsureStatus = "fresh" | "not-modified" | "downloaded" | "stale-offline";
 
 export interface EnsureResult {
-  key: SourceKey;
+  key: string;
   path: string;
   status: EnsureStatus;
 }
@@ -69,12 +69,12 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 async function ensureOne(
-  key: SourceKey,
+  key: string,
   dir: string,
   manifest: Manifest,
   opts: Required<Pick<EnsureOptions, "maxAgeMs" | "force" | "fetchImpl" | "now" | "log">>,
 ): Promise<EnsureResult> {
-  const source = SOURCES[key];
+  const source = ALL_SOURCES[key]!;
   const path = join(dir, source.file);
   const entry = manifest[key];
   const cached = entry !== undefined && entry.url === source.url && (await fileExists(path));

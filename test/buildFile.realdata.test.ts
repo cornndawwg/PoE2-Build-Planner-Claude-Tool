@@ -6,12 +6,12 @@ import { join } from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { defaultCacheDir } from "../src/data/cache.js";
 import { loadGameData, type GameData } from "../src/data/gamedata.js";
-import { SOURCES } from "../src/data/sources.js";
+import { ALL_SOURCES } from "../src/data/sources.js";
 import { AUTHOR, buildFileName, toBuildFile, writeBuildFile, type BuildPlan } from "../src/export/buildFile.js";
 import { canSupport, skillOf } from "../src/skills/skills.js";
 import { PassiveTree } from "../src/tree/tree.js";
 
-const hasCache = Object.values(SOURCES).every((s) => existsSync(join(defaultCacheDir(), s.file)));
+const hasCache = Object.values(ALL_SOURCES).every((s) => existsSync(join(defaultCacheDir(), s.file)));
 
 describe.skipIf(!hasCache)(".build export against real data", () => {
   let data: GameData;

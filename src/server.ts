@@ -9,6 +9,7 @@ import { defaultCacheDir, ensureData, readCachedManifest } from "./data/cache.js
 import { loadGameData, type GameData, type PlayableClass } from "./data/gamedata.js";
 import { buildFileName, findBuildPlannerDir, INVENTORY_IDS, toBuildFile, writeBuildFile } from "./export/buildFile.js";
 import { SLOT_CLASSES, statPriorities } from "./gear/priorities.js";
+import { findUniques } from "./gear/uniques.js";
 import { compatibleSupports, searchSkills } from "./skills/skills.js";
 import { findScaling } from "./tree/scaling.js";
 import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, withLevels } from "./tree/tree.js";
@@ -26,7 +27,7 @@ How to help the player:
 - Defences are a baseline every build needs; keep that advice short and focus on what makes their idea work.
 - Verdicts and numbers are estimates, not guarantees.
 
-Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → stat_priorities → export_build (ask the player first).
+Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → stat_priorities → find_uniques → export_build (ask the player first).
 
 This tool isn't affiliated with or endorsed by Grinding Gear Games in any way.`;
 
@@ -278,6 +279,30 @@ server.registerTool(
     });
     return json({ offence: offence.map(brief), defenceBaseline: defence.map(brief) });
   }),
+);
+
+server.registerTool(
+  "find_uniques",
+  {
+    title: "Find unique items",
+    description:
+      "Unique items whose mods match what the build scales, with their full current mods, level requirement and where they drop. " +
+      "No prices are available: treat boss-only drops (bossDrop: true) as likely expensive and prefer common uniques for budget builds. " +
+      "Slots: " + Object.keys(SLOT_CLASSES).join(", ") + ".",
+    inputSchema: {
+      terms: z.array(z.string()).min(1).describe("Words from mod text, e.g. [\"fire\", \"spell\"]"),
+      avoid: z.array(z.string()).optional(),
+      slots: z.array(z.string()).optional(),
+      maxRequiredLevel: z.number().int().min(1).max(100).optional().describe("e.g. the player's level, for leveling uniques"),
+      limit: z.number().int().min(1).max(50).optional(),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) =>
+    run(async () => {
+      const { data } = await gameData();
+      return json(findUniques(data, args));
+    }),
 );
 
 const passiveEntry = z.object({

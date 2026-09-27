@@ -2,7 +2,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { defaultCacheDir } from "./cache.js";
 import { parseLuaData } from "./lua.js";
-import { SOURCES } from "./sources.js";
+import { parseUniqueFile, type UniqueItem } from "./uniques.js";
+import { SOURCES, UNIQUE_SOURCES } from "./sources.js";
 import type { BaseItem, Mod, Skill, SkillGem, TreeExport, TreeNode } from "./types.js";
 
 export interface PlayableAscendancy {
@@ -59,6 +60,8 @@ export interface GameData {
   skills: Record<string, Skill>;
   baseItems: Record<string, BaseItem>;
   mods: Record<string, Mod>;
+  /** Unique items (current version), with the item class of their base. */
+  uniques: (UniqueItem & { itemClass?: string })[];
   /** Quests that grant passive points, with the area level they're done at. */
   questPoints: { areaLevel: number; points: number; quest: string }[];
 }
@@ -158,6 +161,13 @@ export async function loadGameData(cacheDir: string = defaultCacheDir()): Promis
     readFile(join(cacheDir, SOURCES.pobQuestRewards.file), "utf8"),
   ]);
   const quests = parseLuaData(questSrc) as unknown as PobQuestReward[];
+  const classOfBase = new Map(Object.values(baseItems).map((b) => [b.name, b.item_class]));
+  const isBase = (name: string) => classOfBase.has(name);
+  const uniqueFiles = await Promise.all(
+    Object.values(UNIQUE_SOURCES).map(async (src) =>
+      parseUniqueFile(parseLuaData(await readFile(join(cacheDir, src.file), "utf8")), isBase),
+    ),
+  );
 
   const releasedGems = new Map(
     Object.entries(gems).filter(([, gem]) => gem.base_item.release_state === "released"),
@@ -172,6 +182,7 @@ export async function loadGameData(cacheDir: string = defaultCacheDir()): Promis
     skills,
     baseItems,
     mods,
+    uniques: uniqueFiles.flat().map((u) => ({ ...u, itemClass: classOfBase.get(u.baseType) })),
     questPoints: quests
       .filter((q) => (q.questPoints ?? 0) > 0)
       .map((q) => ({ areaLevel: q.AreaLevel, points: q.questPoints!, quest: `Act ${q.Act}: ${q.Info ?? q.Area ?? ""}` }))

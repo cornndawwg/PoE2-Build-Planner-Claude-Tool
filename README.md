@@ -48,10 +48,13 @@ The first start downloads about 30 MB of game data to `%APPDATA%\poe2-build-find
 | `find_passives` | Notables/keystones/ascendancy notables that scale the build, with drawback flags |
 | `plan_passive_tree` | Cheapest path to the chosen passives, with the level to take each point |
 | `stat_priorities` | Offensive mods to look for per gear slot and on jewels, plus a defence baseline |
+| `find_uniques` | Uniques that fit the build, with current mods, level and where they drop (no prices — see below) |
 | `export_build` | Writes the build into the game's Build Planner (passives with levels, skills and supports, gear hints) |
 | `data_status` | Cached game data info |
 
-Not yet: Path of Building calculations and viability verdicts, and unique items.
+Not yet: Path of Building calculations and viability verdicts.
+
+No unique prices: poe.ninja's API terms ask desktop apps to go through their own backend rather than calling it from players' machines, and this tool deliberately has no backend.
 
 `examples/Example - Fireball Infernalist.build` is a sample export. Copy it into `Documents/My Games/Path of Exile 2/BuildPlanner` to check that the game loads it.
 

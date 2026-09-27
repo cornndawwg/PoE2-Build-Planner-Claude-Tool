@@ -4,11 +4,11 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { defaultCacheDir } from "../src/data/cache.js";
-import { SOURCES } from "../src/data/sources.js";
+import { ALL_SOURCES } from "../src/data/sources.js";
 import { loadGameData, type GameData } from "../src/data/gamedata.js";
 import { canSupport, compatibleSupports, searchSkills, skillOf } from "../src/skills/skills.js";
 
-const hasCache = Object.values(SOURCES).every((s) => existsSync(join(defaultCacheDir(), s.file)));
+const hasCache = Object.values(ALL_SOURCES).every((s) => existsSync(join(defaultCacheDir(), s.file)));
 
 describe.skipIf(!hasCache)("skills against real data", () => {
   let data: GameData;
