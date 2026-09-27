@@ -75,3 +75,18 @@ describe.skipIf(!hasCache)("checkBuild against real data", () => {
     expect(tooMany.points.overBudget).toBe(true);
   });
 });
+
+describe.skipIf(!hasCache)("leveling phases", () => {
+  it("covers levels 1-90 in order with growing budgets", async () => {
+    const { levelingPhases } = await import("../src/build/phases.js");
+    const phases = levelingPhases(await loadGameData());
+    expect(phases[0]!.name).toBe("Act 1");
+    expect(phases[0]!.levels[0]).toBe(1);
+    expect(phases.at(-1)!.levels[1]).toBe(90);
+    for (let i = 1; i < phases.length; i++) {
+      expect(phases[i]!.levels[0]).toBe(phases[i - 1]!.levels[1] + 1);
+      expect(phases[i]!.passivePoints).toBeGreaterThanOrEqual(phases[i - 1]!.passivePoints);
+    }
+    expect(phases[0]!.questRewards.some((r) => r.reward === "+30 to Spirit")).toBe(true);
+  });
+});

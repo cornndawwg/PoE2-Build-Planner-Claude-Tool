@@ -64,17 +64,32 @@ export interface GameData {
   uniques: (UniqueItem & { itemClass?: string })[];
   /** Quests that grant passive points, with the area level they're done at. */
   questPoints: { areaLevel: number; points: number; quest: string }[];
+  /** Every campaign quest reward, in campaign order. */
+  questRewards: QuestReward[];
   /** Quests that grant Spirit (e.g. "+30 to Spirit"), with the area level they're done at. */
   questSpirit: { areaLevel: number; spirit: number; quest: string }[];
 }
 
 interface PobQuestReward {
   Act: number;
+  Description?: string;
   Area?: string;
   Info?: string;
   AreaLevel: number;
   Stat?: string;
+  Options?: string[];
   questPoints?: number;
+}
+
+/** A campaign quest reward, e.g. "+10% to Cold Resistance", or a choice between options. */
+export interface QuestReward {
+  /** "Act 1", "Interlude 2", "Epilog"… */
+  act: string;
+  area: string;
+  quest: string;
+  areaLevel: number;
+  reward?: string;
+  options?: string[];
 }
 
 async function readJson<T>(dir: string, file: string): Promise<T> {
@@ -186,6 +201,14 @@ export async function loadGameData(cacheDir: string = defaultCacheDir()): Promis
     baseItems,
     mods,
     uniques: uniqueFiles.flat().map((u) => ({ ...u, itemClass: classOfBase.get(u.baseType) })),
+    questRewards: quests.map((q) => ({
+      act: q.Description ?? `Act ${q.Act}`,
+      area: q.Area ?? "",
+      quest: q.Info ?? "",
+      areaLevel: q.AreaLevel,
+      reward: q.Stat && q.Stat !== "None" ? q.Stat : undefined,
+      options: q.Options?.map((o) => o.replace(/\s*\n\s*/g, ", ")),
+    })),
     questPoints: quests
       .filter((q) => (q.questPoints ?? 0) > 0)
       .map((q) => ({ areaLevel: q.AreaLevel, points: q.questPoints!, quest: `Act ${q.Act}: ${q.Info ?? q.Area ?? ""}` }))

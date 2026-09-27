@@ -56,6 +56,7 @@ The first start downloads about 30 MB of game data to `%APPDATA%\poe2-build-find
 | `compatible_supports` | Supports that work with a skill, ranked with reasons |
 | `find_passives` | Notables/keystones/ascendancy notables that scale the build, with drawback flags |
 | `plan_passive_tree` | Cheapest path to the chosen passives, with the level to take each point |
+| `leveling_phases` | League-start phases (acts, interludes, maps) with levels, checkpoints and quest rewards |
 | `check_build` | Checks a plan at a character level: skill availability, attribute and Spirit needs, passive budget |
 | `stat_priorities` | Offensive mods to look for per gear slot and on jewels, plus a defence baseline |
 | `find_uniques` | Uniques that fit the build, with current mods, level and where they drop (no prices — see below) |

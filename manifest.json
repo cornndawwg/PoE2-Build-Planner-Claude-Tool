@@ -40,6 +40,10 @@
       "description": "Cheapest path to chosen passives with the level to take each point"
     },
     {
+      "name": "leveling_phases",
+      "description": "League-start phases with level ranges, checkpoints and quest rewards"
+    },
+    {
       "name": "check_build",
       "description": "Check skill availability, attributes, Spirit and passive budget at a level"
     },

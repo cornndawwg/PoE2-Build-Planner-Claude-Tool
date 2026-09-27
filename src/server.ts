@@ -11,6 +11,7 @@ import { buildFileName, findBuildPlannerDir, INVENTORY_IDS, toBuildFile, writeBu
 import { DEFENCE_STYLES, SLOT_CLASSES, statPriorities } from "./gear/priorities.js";
 import { findUniques } from "./gear/uniques.js";
 import { checkBuild } from "./build/checks.js";
+import { levelingPhases } from "./build/phases.js";
 import { compatibleSupports, findGem, searchSkills } from "./skills/skills.js";
 import { findScaling } from "./tree/scaling.js";
 import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, withLevels } from "./tree/tree.js";
@@ -28,7 +29,11 @@ How to help the player:
 - Defences are a baseline every build needs; keep that advice short and focus on what makes their idea work.
 - Verdicts and numbers are estimates, not guarantees.
 
-Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → stat_priorities → find_uniques → export_build (ask the player first).
+First ask: is this a league start (new character from level 1) or an existing character? For an existing character, ask their level and roughly what gear they have, and plan from there.
+
+League start: call leveling_phases and plan every phase, not just the end-game build. For each phase pick skills the character can use by then (search_skills with availableBy), supports, the passives to take during it, and gear to look for (stat_priorities with itemLevel ≈ the phase's levels). Run check_build at each phase's checkpointLevel and fix what it flags before moving on. If the final build is weak early, use a different leveling skill or setup and say when to switch. Mention useful quest rewards in each phase.
+
+Typical flow: list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → stat_priorities → find_uniques → export_build (ask the player first). For a league start, export one Build Planner file per phase whose setup differs (e.g. "Name - 1 Acts 1-2", "Name - 2 Acts 3-4", "Name - 3 Maps"), so the player can switch plans in game.
 
 This tool isn't affiliated with or endorsed by Grinding Gear Games in any way.`;
 
@@ -317,6 +322,23 @@ server.registerTool(
     run(async () => {
       const { data } = await gameData();
       return json(findUniques(data, args));
+    }),
+);
+
+server.registerTool(
+  "leveling_phases",
+  {
+    title: "Leveling phases",
+    description:
+      "Campaign and end-game phases for a league-start character (Act 1 … Interludes, early maps, end-game), with approximate " +
+      "level ranges, a checkpoint level to run check_build at, passive points and quest Spirit by then, the highest gem level " +
+      "usable, and the quest rewards in each phase (resistances, Spirit, life, and choices). Level ranges come from quest area levels.",
+    annotations: { readOnlyHint: true },
+  },
+  async () =>
+    run(async () => {
+      const { data } = await gameData();
+      return json(levelingPhases(data));
     }),
 );
 

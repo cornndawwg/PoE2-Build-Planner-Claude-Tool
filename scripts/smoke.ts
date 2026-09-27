@@ -43,6 +43,7 @@ const asc = passives.filter((p: { kind: string }) => p.kind === "ascendancy-nota
 const plan = JSON.parse(await call("plan_passive_tree", { class: "Witch", ascendancy: "Infernalist", passives: main, ascendancyPassives: asc }));
 await call("stat_priorities", { terms: ["fire", "spell", "cast speed"], avoid: ["attack"], slots: ["Amulet", "Helmet", "Jewel"], perSlot: 3, defence: ["energy shield"], itemLevel: 30 });
 
+await call("leveling_phases");
 await call("check_build", {
   class: "Infernalist",
   characterLevel: 28,
