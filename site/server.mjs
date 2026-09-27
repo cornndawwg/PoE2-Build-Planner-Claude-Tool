@@ -14,6 +14,12 @@ const security = {
 };
 
 createServer(async (req, res) => {
+  // One address for search engines: www → the bare domain.
+  const host = (req.headers["x-forwarded-host"] ?? req.headers.host ?? "").toString().split(",")[0].trim();
+  if (host.startsWith("www.")) {
+    res.writeHead(301, { Location: `https://${host.slice(4)}${req.url ?? "/"}` }).end();
+    return;
+  }
   const path = decodeURIComponent(new URL(req.url ?? "/", "http://x").pathname);
   const file = normalize(join(root, path === "/" ? "index.html" : path));
   const send = async (status, path) => {
