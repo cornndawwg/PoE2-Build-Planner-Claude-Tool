@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { checkBuild, spiritCost } from "../build/checks.js";
 import { gearTierFor, type Goals } from "../build/goals.js";
+import type { GearTier } from "../engine/gear.js";
 import type { GameData, PlayableClass } from "../data/gamedata.js";
 import { buildFileName, toBuildFile, type PlanSlot } from "../export/buildFile.js";
 import { availableFromLevel } from "../skills/levels.js";
@@ -66,6 +67,8 @@ export interface GuideInput {
   weapons?: string[];
   /** The player's goals (from build_intake): end-game gear by budget and an honest goal check. */
   goals?: Goals;
+  /** Assumed gear quality for the numbers; wins over goals.budget. */
+  gearTier?: GearTier;
 }
 
 /** Guide slot names (from stat_priorities) mapped to Build Planner inventory slots. */
@@ -238,7 +241,7 @@ export async function createGuide(
     let verdicts: GuidePhase["verdicts"];
     let goalCheck: GuidePhase["goalCheck"];
     let setupGaps: string[] | undefined;
-    const tier = gearTierFor(input.goals?.budget, phase.levels[1]);
+    const tier = input.gearTier ?? gearTierFor(input.goals?.budget, phase.levels[1]);
     if (options.engine && skills.length > 0) {
       try {
         const main = skills[0]!.gem;

@@ -84,6 +84,25 @@ await call("evaluate_build", {
   amuletSkill: "Herald of Ash",
   weaponSwap: { weapons: ["Bow"], skills: [{ gemId: "Lightning Arrow" }] },
 });
+// Druid / Oracle: class-specific passives, term-preferred routes, gated Oracle-only passives.
+const druidPlan = JSON.parse(
+  await call("plan_passive_tree", {
+    class: "Oracle",
+    passives: ["Guardian of the Wilds", "Night's Bite"],
+    ascendancyPassives: ["The Unseen Path"],
+    terms: ["spell"],
+    targetLevel: 30,
+  }),
+);
+const gated = druidPlan.passives?.find((n: { name: string }) => n.name === "Night's Bite");
+if (!gated?.requires || !druidPlan.passives?.some((n: { name: string }) => n.name === "Guardian of the Wilds")) process.exitCode = 1;
+const lockedPlan = JSON.parse(await call("plan_passive_tree", { class: "Oracle", passives: ["Night's Bite"] }));
+if (!lockedPlan.unreachable?.[0]?.includes("The Unseen Path")) process.exitCode = 1;
+const smalls = JSON.parse(await call("find_passives", { class: "Druid", near: "Guardian of the Wilds", within: 3, kinds: ["small"] }));
+if (!smalls.length || !smalls.every((n: { kind: string }) => n.kind === "small")) process.exitCode = 1;
+const gatedCheck = JSON.parse(await call("check_build", { class: "Oracle", characterLevel: 30, passives: ["Night's Bite"], skills: [{ gemId: "Spark" }] }));
+if (!gatedCheck.warnings?.some((w: string) => /needs The Unseen Path first/.test(w))) process.exitCode = 1;
+await call("list_builds");
 await call("build_intake");
 const goalEval = JSON.parse(
   await call("evaluate_build", {

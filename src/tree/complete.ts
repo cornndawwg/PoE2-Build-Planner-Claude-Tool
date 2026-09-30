@@ -22,9 +22,10 @@ export function completePassives(tree: PassiveTree, startKey: string, keys: stri
   const wrongAscendancy = ascGiven.filter((k) => tree.nodes.get(k)!.ascendancyId !== ascendancyId);
 
   // Planning to every given node (they're all targets) returns them plus the missing connectors.
-  const mainPlan = tree.planMainTree(startKey, mainGiven, ascendancyId);
+  // Gated passives (e.g. Oracle-only ones) count only if their unlocking ascendancy node is taken.
   const ascTargets = ascGiven.filter((k) => !wrongAscendancy.includes(k));
   const ascPlan = ascendancyId && ascTargets.length ? tree.planAscendancy(ascendancyId, ascTargets) : { nodes: [], unreachable: [] };
+  const mainPlan = tree.planMainTree(startKey, mainGiven, ascendancyId, { unlocked: ascPlan.nodes.map((n) => n.key) });
 
   const given = new Set(unique);
   const main = mainPlan.nodes.map((n) => n.key);

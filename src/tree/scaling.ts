@@ -11,6 +11,8 @@ export interface ScalingNode {
   matched: string[];
   /** Stat lines that look like downsides ("reduced", "less", "cannot", …). A keyword heuristic. */
   drawbacks: string[];
+  /** Ascendancy node that must be taken first (e.g. "The Unseen Path" for Oracle-only passives). */
+  requires?: string;
   /** Points from the class start (main tree only; undefined if no class given or unreachable). */
   distance?: number;
   ascendancyId?: string;
@@ -25,6 +27,8 @@ export interface ScalingQuery {
   ascendancyId?: string;
   kinds?: NodeKind[];
   limit?: number;
+  /** Only nodes in this set (e.g. within a few points of a given node). */
+  within?: ReadonlySet<string>;
 }
 
 const DRAWBACK = /\b(reduced|less|cannot|can't|lose|loses|no longer|converts?)\b/i;
@@ -53,7 +57,9 @@ export function findScaling(tree: PassiveTree, query: ScalingQuery): ScalingNode
     const stats = (node.stats ?? []).map(stripMarkup);
     const haystack = [node.name ?? "", ...stats].join("\n");
     const matched = patterns.filter(([, re]) => re.test(haystack)).map(([t]) => t);
-    if (matched.length === 0) continue;
+    // With no terms (e.g. listing what's near a node), everything of the right kind matches.
+    if (patterns.length > 0 && matched.length === 0) continue;
+    if (query.within && !query.within.has(key)) continue;
     const distance = node.ascendancyId ? undefined : distances?.get(key);
     if (distances && !node.ascendancyId && distance === undefined) continue;
     results.push({
@@ -65,6 +71,7 @@ export function findScaling(tree: PassiveTree, query: ScalingQuery): ScalingNode
       matched,
       drawbacks: stats.filter((line) => DRAWBACK.test(line)),
       distance,
+      requires: tree.unlockedBy(key).map((k) => tree.nodes.get(k)?.name ?? k).join(" or ") || undefined,
       ascendancyId: node.ascendancyId,
     });
   }

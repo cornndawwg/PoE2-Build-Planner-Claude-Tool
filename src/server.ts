@@ -7,7 +7,9 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { defaultCacheDir, ensureData, readCachedManifest } from "./data/cache.js";
 import { loadGameData, type GameData, type PlayableClass } from "./data/gamedata.js";
-import { buildFileName, findBuildPlannerDir, INVENTORY_IDS, toBuildFile, writeBuildFile } from "./export/buildFile.js";
+import { archiveEntries, buildFileName, findBuildPlannerDir, INVENTORY_IDS, listBuildFiles, toBuildFile, writeBuildFile } from "./export/buildFile.js";
+import { readdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import {
   amuletSkillSuggestions,
   anointSuggestions,
@@ -31,16 +33,17 @@ import { optimizeBuild, type Objective } from "./engine/optimize.js";
 import { compareBuilds } from "./engine/compare.js";
 import { evaluateBuild, type EvaluateInput } from "./engine/evaluate.js";
 import { findEngine, PobEngine } from "./engine/pob.js";
-import { createGuide } from "./guide/guide.js";
+import { createGuide, guidesDir } from "./guide/guide.js";
 import type { Skill } from "./data/types.js";
 import { availableFromLevel } from "./skills/levels.js";
 import { compatibleSupports, findGem, searchSkills } from "./skills/skills.js";
 import { stripMarkup } from "./text.js";
 import { completePassives } from "./tree/complete.js";
-import { findScaling } from "./tree/scaling.js";
+import { findScaling, termPattern } from "./tree/scaling.js";
+import { ASCENDANCY_TRIALS, trialForAscendancyPoint, TRIALS_NOTE } from "./build/trials.js";
 import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, treeForClass, withLevels } from "./tree/tree.js";
 
-const VERSION = "0.5.1";
+const VERSION = "0.6.0";
 const log = (message: string) => process.stderr.write(`[poe2-build-planner] ${message}\n`);
 
 const INSTRUCTIONS = `Tools for planning Path of Exile 2 builds (game version 0.5) for casual players.
@@ -63,7 +66,14 @@ A finished build uses what it has: fill the Spirit (Spirit skills, or a free one
 
 League start: call leveling_phases and plan every phase, not just the end-game build. For each phase pick skills the character can use by then (search_skills with availableBy), supports, the passives to take during it, and gear to look for (stat_priorities with itemLevel ≈ the phase's levels). Run check_build at each phase's checkpointLevel and fix what it flags before moving on. If the final build is weak early, use a different leveling skill or setup and say when to switch. Mention useful quest rewards in each phase.
 
-To weigh two options (weapon choice, ascendancy, a key unique), use compare_builds instead of guessing.
+Explore before committing — the best option is often not the obvious one:
+- Skills: test 8-12 candidate skills that fit the fantasy on the same tree and gear (compare_builds, 4 at a time) before picking the main skill.
+- Then sweep keystones that fit the skill (e.g. Wildsurge Incantation for Storm and Plant spells), every plausible ascendancy, each open support slot, and the Spirit setup — compare, don't guess.
+- Some passives only open up after an ascendancy node (find_passives shows "requires", e.g. Oracle-only passives need The Unseen Path). Check and test them for that ascendancy.
+- Every early notable must earn its place: at checkpoints (levels 10, 20, 30 and the main-skill switch) compare it with a damage-first alternative. Don't copy a route from an external guide without testing it. Keep leveling on the class's own side of the tree when the cost is small.
+- Pass the build's terms to plan_passive_tree so ties between equally short routes take useful small passives; list small passives as targets (find_passives with near and kinds ["small"]) to force a route. The planner follows the priority order you give and flags notables it passes on the way (onTheWay).
+- Ascendancy trials: leveling_phases has rough typical trial levels; ask the player when they'll do them.
+- evaluate_build lists notModelled mechanics for the build (triggered spells, infusions, Rage, self-damage, supports that don't change DPS…). Mention them when they affect a decision, and treat "no change" results from those as untested, not as useless.
 
 Chase uniques (Mageblood, Headhunter and similar): only suggest them if the player has the budget or asks. Show what they add with compare_builds, with and without the unique in items (flasks are assumed, so Mageblood's effect counts; set flasksActive). Headhunter's stolen rare-monster mods can't be calculated, so describe them instead. Timeless jewels (Heroic Tragedy, Undying Hate) aren't calculated yet either: describe what they do and say the numbers leave them out. Give a trade_links search so the player can see the current price.
 
@@ -73,7 +83,13 @@ Costs: item_prices has live prices for currency, runes, soul cores, Liquid Emoti
 3. Otherwise, briefly explain how to check it: open the link, sort by price, and ignore the few cheapest listings (often fake or already sold).
 Budget/mid/high gear: evaluate_build's gearTier.
 
-Typical flow: build_intake (ask) → list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → evaluate_build with goals (be honest about goalCheck) → optimize_build → evaluate again → stat_priorities → suggest_extras (Spirit skills, free-Spirit amulets, jewels, flasks and charms, anoints, runes and soul cores) → find_uniques → export_build (ask the player first) → create_build_guide to lay it all out as a web page (ask first; it opens in their browser). For a league start, export one Build Planner file per phase whose setup differs (e.g. "Name - 1 Acts 1-2", "Name - 2 Acts 3-4", "Name - 3 Maps"), so the player can switch plans in game.
+Typical flow: build_intake (ask) → list_classes → search_skills → compatible_supports → find_passives (with the class and ascendancy) → plan_passive_tree with the notables you chose → check_build → evaluate_build with goals (be honest about goalCheck) → optimize_build → evaluate again → stat_priorities → suggest_extras (Spirit skills, free-Spirit amulets, jewels, flasks and charms, anoints, runes and soul cores) → find_uniques → export_build (ask the player first) → create_build_guide to lay it all out as a web page (ask first; it opens in their browser). Build the guide from the same passives and skills as the exported files so they never drift apart.
+
+Exporting: write a leveling file (passives with level ranges) and an end-game file with levelRanges "none" so the whole tree shows (e.g. "Name - Leveling" and "Name - Endgame"); for a league start, add a file per phase whose setup differs. Tell the player to fully restart Path of Exile 2 after an export — the game keeps its copy of a file. When files are superseded, offer to move the old ones out of the way (list_builds, then remove_builds after they agree).
+
+Screenshots of the in-game passive tree: the planner overlays the imported plan on what the player has allocated, in different colours (players report gold = allocated, blue/teal = the plan). Confirm which is which with the player before reading a screenshot.
+
+If the game shows a passive, gem or stat the tool doesn't know, run data_status: the data may be a few days behind a new patch. Trust the game and say so.
 
 This tool isn't affiliated with or endorsed by Grinding Gear Games in any way.`;
 
@@ -141,8 +157,19 @@ function resolveNode(tree: PassiveTree, ref: string): string {
   for (const [key, node] of tree.nodes) if (node.id === ref) return key;
   const byName = [...tree.nodes].filter(([, n]) => n.name?.toLowerCase() === ref.toLowerCase());
   if (byName.length === 1) return byName[0]![0];
-  if (byName.length > 1) throw new Error(`"${ref}" matches ${byName.length} nodes; use the key or id from find_passives`);
-  throw new Error(`Unknown passive "${ref}"`);
+  if (byName.length > 1) {
+    const options = byName
+      .slice(0, 12)
+      .map(([key, n]) => `key ${key}: ${(n.stats ?? []).map(stripMarkup).join("; ")} (next to ${tree.neighbors(key).map((k) => tree.nodes.get(k)?.name ?? k).join(", ")})`);
+    throw new Error(
+      `"${ref}" matches ${byName.length} passives; pass the key instead. ${byName.length > 12 ? "First 12: " : ""}${options.join(" | ")}. ` +
+        `To find the ones near a node, use find_passives with near and kinds ["small"].`,
+    );
+  }
+  throw new Error(
+    `Unknown passive "${ref}". Check the spelling, or search with find_passives. If the game shows a name the tool doesn't know, ` +
+      `the tree data may be behind the live patch: data_status shows its version.`,
+  );
 }
 
 function summariseClass(c: PlayableClass) {
@@ -166,10 +193,20 @@ server.registerTool(
     run(async () => {
     const { data } = await gameData();
     const manifest = await readCachedManifest();
+    const treeVersion = /TreeData\/(\d+_\d+)\//.exec(manifest.pobTree?.url ?? "")?.[1]?.replace("_", ".");
     return json({
+      toolVersion: VERSION,
       cacheDir: defaultCacheDir(),
+      passiveTree: {
+        source: "GGG's passive tree export, with class-specific passives from Path of Building's tree",
+        pathOfBuildingTreeVersion: treeVersion,
+        treeLastUpdated: manifest.tree?.lastModified,
+        classSpecificPassives: data.nodeVariants.size,
+      },
       files: Object.fromEntries(Object.entries(manifest).map(([k, v]) => [k, { checkedAt: v?.checkedAt, lastModified: v?.lastModified }])),
       counts: { classes: data.classes.length, playerGems: data.playerGems.size, passives: data.nodes.size },
+      note:
+        "Data is re-checked daily. If the game shows a passive, gem or stat the tool doesn't know, the sources may be a few days behind a new patch: say so, and trust the game.",
     });
   }),
 );
@@ -297,9 +334,18 @@ server.registerTool(
       "Notables, keystones and ascendancy notables whose text matches what the build scales. Give the class (and ascendancy) " +
       "to get distances from the class start and that ascendancy's nodes. Terms are words from passive text, e.g. " +
       "fire, spell, cast speed, critical, ignite, minion, projectile, area of effect, energy shield, life. " +
-      "Set listAscendancy to get every node of the ascendancy (no terms needed), to see all 8-point options.",
+      "Set listAscendancy to get every node of the ascendancy (no terms needed), to see all 8-point options. " +
+      "Small passives too: kinds [\"small\"] with near (a node) and within (points) lists the small passives around a node, " +
+      "with keys to use as plan_passive_tree targets (terms optional then). Passives that need an ascendancy node first " +
+      "(e.g. Oracle-only ones need The Unseen Path) show it in requires.",
     inputSchema: {
-      terms: z.array(z.string()).optional().describe("Required unless listAscendancy is set"),
+      terms: z.array(z.string()).optional().describe("Required unless listAscendancy or near is set"),
+      kinds: z
+        .array(z.enum(["keystone", "notable", "ascendancy-notable", "jewel-socket", "small", "attribute"]))
+        .optional()
+        .describe("Default: keystone, notable, ascendancy-notable"),
+      near: z.string().optional().describe("Only passives within a few points of this node (key, id or exact name)"),
+      within: z.number().int().min(1).max(10).optional().describe("Points from near (default 4)"),
       class: z.string().optional().describe("Class or ascendancy name"),
       ascendancy: z.string().optional(),
       listAscendancy: z.boolean().optional().describe("List every node of the ascendancy, with stats"),
@@ -308,7 +354,7 @@ server.registerTool(
     },
     annotations: { readOnlyHint: true },
   },
-  async ({ terms = [], class: className, ascendancy, listAscendancy, includeJewelSockets, limit }) =>
+  async ({ terms = [], class: className, ascendancy, listAscendancy, includeJewelSockets, limit, kinds: kindList, near, within }) =>
     run(async () => {
     const { data, tree: baseTree } = await gameData();
     const found = className ? findClass(data, className, ascendancy) : undefined;
@@ -325,16 +371,29 @@ server.registerTool(
         }),
       });
     }
-    if (terms.length === 0) throw new Error("Give some terms, or set listAscendancy.");
-    const kinds = ["keystone", "notable", "ascendancy-notable"] as const;
+    if (terms.length === 0 && !near) throw new Error("Give some terms, or set listAscendancy or near.");
+    const kinds = kindList?.length ? kindList : (["keystone", "notable", "ascendancy-notable"] as const);
+    let nearby: Map<string, number> | undefined;
+    if (near) {
+      const from = resolveNode(tree, near);
+      const reach = within ?? 4;
+      nearby = new Map([...tree.distancesFrom(from, found?.asc?.id)].filter(([k, d]) => d <= reach && k !== from));
+    }
     const results = findScaling(tree, {
       terms,
       startKey: found?.cls.startNode,
       ascendancyId: found?.asc?.id,
       kinds: includeJewelSockets ? [...kinds, "jewel-socket"] : [...kinds],
-      limit,
+      limit: limit ?? (near ? 60 : undefined),
+      within: nearby ? new Set(nearby.keys()) : undefined,
     });
-    return json(results.map(({ ascendancyId, ...rest }) => rest));
+    return json(
+      results.map(({ ascendancyId, ...rest }) => ({
+        ...rest,
+        pointsFromNear: nearby?.get(rest.key),
+        neighbours: near ? tree.neighbors(rest.key).map((k) => tree.describe(k).name || k) : undefined,
+      })),
+    );
   }),
 );
 
@@ -343,54 +402,105 @@ server.registerTool(
   {
     title: "Plan passive tree",
     description:
-      "Connect the class start to the chosen passives using as few points as possible, in a sensible order, and say the " +
-      "character level each point can be taken at. Also paths the ascendancy nodes (8 points). Pass passives by key, id or exact name.",
+      "Connect the class start to the chosen passives and say the character level each point can be taken at. By default " +
+      "targets are reached in the order given (priority order); order: \"cheapest\" takes the nearest first instead. Among " +
+      "equally short routes it prefers small passives matching `terms` and avoids `avoid` (e.g. terms [\"spell\", \"fire\"] picks " +
+      "Spell Damage smalls over Life Regeneration ones); to force a route, list small passives as targets too (find_passives " +
+      "with kinds [\"small\"] and `near` gives their keys). Notables passed on the way to another target are flagged (onTheWay). " +
+      "Passives gated behind an ascendancy node (e.g. Oracle-only passives need The Unseen Path) are only used when that node is in " +
+      "ascendancyPassives, and are flagged with the trial that unlocks them. Also paths the ascendancy nodes (8 points, 2 per " +
+      "trial). Pass passives by key, id or exact name.",
     inputSchema: {
       class: z.string().describe("Class or ascendancy name"),
       ascendancy: z.string().optional(),
       passives: z.array(z.string()).describe("Main-tree targets in priority order"),
-      ascendancyPassives: z.array(z.string()).optional(),
+      ascendancyPassives: z.array(z.string()).optional().describe("In the order they'll be taken (2 per trial)"),
       targetLevel: z.number().int().min(1).max(100).optional().describe("Level to budget for (default 90)"),
+      order: z.enum(["priority", "cheapest"]).optional().describe("Default priority: targets in the order given"),
+      terms: z.array(z.string()).optional().describe("Prefer small passives matching these on equally short routes"),
+      avoid: z.array(z.string()).optional().describe("Avoid small passives matching these on equally short routes"),
     },
     annotations: { readOnlyHint: true },
   },
-  async ({ class: className, ascendancy, passives, ascendancyPassives, targetLevel }) =>
+  async ({ class: className, ascendancy, passives, ascendancyPassives, targetLevel, order, terms, avoid }) =>
     run(async () => {
-    const { data, tree: baseTree } = await gameData();
-    const { cls, asc } = findClass(data, className, ascendancy);
-    const tree = treeForClass(baseTree, data.nodeVariants, cls.name, asc?.name);
-    const level = targetLevel ?? 90;
-    const plan = tree.planMainTree(cls.startNode, passives.map((p) => resolveNode(tree, p)), asc?.id);
-    const budget = pointsAtLevel(level, data.questPoints);
-    const ascPlan = asc && ascendancyPassives?.length ? tree.planAscendancy(asc.id, ascendancyPassives.map((p) => resolveNode(tree, p))) : undefined;
-    return json({
-      class: cls.name,
-      ascendancy: asc?.name,
-      pointsUsed: plan.nodes.length,
-      pointsAvailableAtTargetLevel: budget,
-      spareForDefenceAndAttributes: budget - plan.nodes.length,
-      warning:
-        plan.nodes.length > budget
-          ? `Over budget: needs ${plan.nodes.length} points but a level ${level} character has ${budget}. Drop or swap some targets.`
-          : undefined,
-      unreachable: plan.unreachable.map((k) => tree.describe(k).name || k),
-      passives: withLevels(plan, data.questPoints).map(({ key, id, name, kind, stats, level: at, forTarget }) => ({
-        takeAtLevel: at,
-        name,
-        kind,
-        id,
-        key,
-        stats: kind === "small" || kind === "attribute" ? undefined : stats,
-        towards: tree.describe(forTarget).name,
-      })),
-      ascendancyPlan: ascPlan && {
-        pointsUsed: ascPlan.nodes.length,
-        pointsAvailable: ASCENDANCY_POINTS,
-        unreachable: ascPlan.unreachable.map((k) => tree.describe(k).name || k),
-        passives: ascPlan.nodes.map(({ id, name, kind, stats }) => ({ name, kind, id, stats })),
-      },
-    });
-  }),
+      const { data, tree: baseTree } = await gameData();
+      const { cls, asc } = findClass(data, className, ascendancy);
+      const tree = treeForClass(baseTree, data.nodeVariants, cls.name, asc?.name);
+      const level = targetLevel ?? 90;
+      const targets = passives.map((p) => resolveNode(tree, p));
+      const ascTargets = (ascendancyPassives ?? []).map((p) => resolveNode(tree, p));
+      const prefer = (terms ?? []).map(termPattern);
+      const shun = (avoid ?? []).map(termPattern);
+      const weight = (key: string) => {
+        const text = (tree.nodes.get(key)?.stats ?? []).map(stripMarkup).join("\n");
+        return prefer.filter((re) => re.test(text)).length - 2 * shun.filter((re) => re.test(text)).length;
+      };
+      const ascPlan = asc && ascTargets.length ? tree.planAscendancy(asc.id, ascTargets, { order: "priority" }) : undefined;
+      const plan = tree.planMainTree(cls.startNode, targets, asc?.id, {
+        order: order ?? "priority",
+        weight,
+        unlocked: ascPlan?.nodes.map((n) => n.key) ?? [],
+      });
+      const budget = pointsAtLevel(level, data.questPoints);
+
+      // Ascendancy-gated passives: which trial unlocks them.
+      const ascPoint = new Map(ascPlan?.nodes.map((n, i) => [n.key, i + 1]) ?? []);
+      const gate = (key: string) => {
+        const by = tree.unlockedBy(key);
+        if (!by.length) return undefined;
+        const taken = by.find((k) => ascPoint.has(k));
+        const trial = taken ? trialForAscendancyPoint(ascPoint.get(taken)!) : undefined;
+        return { requires: by.map((k) => tree.describe(k).name).join(" or "), trial };
+      };
+      const requested = new Set(targets);
+      const warnings: string[] = [];
+      if (plan.nodes.length > budget) {
+        warnings.push(`Over budget: needs ${plan.nodes.length} points but a level ${level} character has ${budget}. Drop or swap some targets.`);
+      }
+      const leveled = withLevels(plan, data.questPoints).map(({ key, id, name, kind, stats, level: at, forTarget }) => {
+        const g = gate(key);
+        if (g?.trial && at !== undefined && at < g.trial.typicalLevel && requested.has(key)) {
+          warnings.push(`${name} needs ${g.requires} (trial ${g.trial.trial}, around level ${g.trial.typicalLevel}) but is scheduled at level ${at}: move it later in the priority order.`);
+        }
+        return {
+          takeAtLevel: at,
+          name,
+          kind,
+          id,
+          key,
+          stats: kind === "attribute" ? undefined : stats,
+          towards: tree.describe(forTarget).name,
+          onTheWay: (kind === "notable" || kind === "keystone") && !requested.has(key) ? true : undefined,
+          requires: g?.requires,
+          unlockedAtTrial: g?.trial && { trial: g.trial.trial, aboutLevel: g.trial.typicalLevel },
+        };
+      });
+      const unreachable = plan.unreachable.map((k) => {
+        const g = gate(k);
+        return g && !g.trial ? `${tree.describe(k).name || k} (needs ${g.requires} in ascendancyPassives)` : tree.describe(k).name || k;
+      });
+      return json({
+        class: cls.name,
+        ascendancy: asc?.name,
+        pointsUsed: plan.nodes.length,
+        pointsAvailableAtTargetLevel: budget,
+        spareForDefenceAndAttributes: budget - plan.nodes.length,
+        warnings: warnings.length ? warnings : undefined,
+        unreachable,
+        passives: leveled,
+        ascendancyPlan: ascPlan && {
+          pointsUsed: ascPlan.nodes.length,
+          pointsAvailable: ASCENDANCY_POINTS,
+          unreachable: ascPlan.unreachable.map((k) => tree.describe(k).name || k),
+          passives: ascPlan.nodes.map(({ id, name, kind, stats }, i) => {
+            const trial = trialForAscendancyPoint(i + 1);
+            return { name, kind, id, stats, trial: trial?.trial, aboutLevel: trial?.typicalLevel };
+          }),
+          note: TRIALS_NOTE,
+        },
+      });
+    }),
 );
 
 /** One build to calculate; shared by evaluate_build and compare_builds. */
@@ -435,7 +545,10 @@ const buildSpec = {
   gearTier: z
     .enum(["budget", "mid", "high"])
     .optional()
-    .describe("Quality of the assumed rares: budget (default, mid rolls), mid (good rolls, more mods), high (perfect rolls, full mods)"),
+    .describe(
+      "Quality of the assumed rares: budget (mid rolls), mid (good rolls, more mods), high (perfect rolls, full mods). Wins over goals.budget; " +
+        "without either, budget. goals.budget only raises end-game (65+) gear, so at campaign levels all three budgets look the same.",
+    ),
   anoint: z.string().optional().describe("Notable to anoint on the amulet (Liquid Emotions), e.g. \"Potent Incantation\""),
   helmetInstill: z.string().optional().describe("Notable to instill on the helmet via a Raven-Touched Shard (level 60+, expensive)"),
   socketables: z
@@ -863,9 +976,10 @@ server.registerTool(
       const { data } = await gameData();
       return json({
         phases: levelingPhases(data),
+        ascendancyTrials: ASCENDANCY_TRIALS,
         notes: [
           "passivePoints already includes the quest rewards' \"+2 Weapon Set Passive Skill Points\" (24 in total), counted the way Path of Building counts them — spend them like normal points in the plan.",
-          "Ascendancy points come from the Trials in the campaign (8 in total, 2 per trial). When each trial is done isn't in the game data; ask the player or give a rough estimate and say it's an estimate.",
+          "Ascendancy points come from the Trials (8 in total, 2 per trial). ascendancyTrials gives rough typical levels for each trial; they're estimates, not game data, so ask the player and say they're estimates.",
           "Level ranges are approximate: they come from the area levels of the campaign's reward quests.",
         ],
       });
@@ -920,7 +1034,19 @@ server.registerTool(
         weapons: args.weapons,
       });
       if (completed.added.length) result.warnings.unshift(`Added ${completed.added.length} connecting passives the list was missing; they're counted in the budget.`);
-      if (completed.unreachable.length) result.warnings.unshift(`Can't reach: ${completed.unreachable.join(", ")}.`);
+      // Gated passives (e.g. Oracle-only ones) are unreachable until their unlocking node is taken: say so.
+      const gatedReason = (key: string) => {
+        const by = tree.unlockedBy(key);
+        return by.length ? ` (needs ${by.map((k) => tree.describe(k).name).join(" or ")} first — add it to ascendancyPassives, or leave this out until that trial)` : "";
+      };
+      const unreachableGiven = given.filter((k) => completed.unreachable.includes(tree.describe(k).name || k));
+      if (completed.unreachable.length) {
+        const described = completed.unreachable.map((name) => {
+          const key = unreachableGiven.find((k) => (tree.describe(k).name || k) === name);
+          return key ? name + gatedReason(key) : name;
+        });
+        result.warnings.unshift(`Can't reach: ${described.join(", ")}.`);
+      }
       return json({ ...result, passivesAddedToConnect: completed.added });
     }),
 );
@@ -957,6 +1083,7 @@ server.registerTool(
       defence: z.array(z.enum(DEFENCE_STYLES)).optional().describe("Defence layers for the assumed gear (default: life)"),
       weapons: z.array(z.string()).optional(),
       goals: goalsSchema.optional(),
+      gearTier: z.enum(["budget", "mid", "high"]).optional().describe("Assumed gear quality for every phase's numbers; wins over goals.budget"),
       passivePlan: z.array(guidePassive),
       ascendancyPassives: z
         .array(z.object({ id: z.string(), phase: z.number().int().min(0).optional().describe("0-based phase index it's taken in") }))
@@ -1019,6 +1146,7 @@ server.registerTool(
           defence: args.defence,
           weapons: args.weapons,
           goals: args.goals,
+          gearTier: args.gearTier,
         },
         { open: args.open, toolVersion: VERSION, engine: getEngine() },
       );
@@ -1079,6 +1207,12 @@ server.registerTool(
           }),
         )
         .optional(),
+      levelRanges: z
+        .enum(["leveling", "none"])
+        .optional()
+        .describe(
+          "leveling (default): each passive shows from the level you take it. none: the whole tree at once — use for an end-game file (e.g. \"Name - Endgame\")",
+        ),
       write: z.boolean().optional().describe("Write the file (default true). false = just return it"),
       overwrite: z.boolean().optional().describe("Replace an existing file with the same name that this tool didn't write"),
     },
@@ -1090,7 +1224,7 @@ server.registerTool(
       const tree = treeForClass(baseTree, data.nodeVariants, cls.name, asc?.name);
       const toPassive = (p: z.infer<typeof passiveEntry>) => ({
         id: tree.describe(resolveNode(tree, p.id)).id,
-        level: p.level,
+        level: args.levelRanges === "none" ? undefined : p.level,
         note: p.note,
       });
       const { build, warnings } = toBuildFile(data, {
@@ -1116,8 +1250,72 @@ server.registerTool(
         written: true,
         path,
         warnings,
-        nextStep: "Open the Build Planner in game (or restart the game if it was open) to see the build.",
+        nextSteps: [
+          "If Path of Exile 2 is running, restart it fully: the game keeps its copy of a planner file and may not show a new or changed one until then. Saving under a new name also works.",
+          args.levelRanges === "none"
+            ? "This file shows the whole tree at once."
+            : "The in-game planner appears to highlight only passives whose level range has started, so a low-level character sees just the first few. Export a second copy with levelRanges \"none\" (e.g. \"Name - Endgame\") to see the whole tree.",
+          "Old files can be listed and moved out of the way with list_builds and remove_builds.",
+        ],
         counts: { passives: build.passives?.length ?? 0, skills: build.skills?.length ?? 0, gearHints: build.inventory_slots?.length ?? 0 },
+      });
+    }),
+);
+
+server.registerTool(
+  "list_builds",
+  {
+    title: "List Build Planner files and guides",
+    description:
+      "The .build files in Path of Exile 2's BuildPlanner folder (newest first, and whether this tool made each one) and the " +
+      "guide folders this tool created. Use before remove_builds, or to find the file names of earlier exports.",
+    annotations: { readOnlyHint: true },
+  },
+  async () =>
+    run(async () => {
+      const dir = findBuildPlannerDir();
+      const guides = guidesDir();
+      const guideFolders = await readdir(guides, { withFileTypes: true }).then(
+        (entries) => entries.filter((e) => e.isDirectory()).map((e) => e.name),
+        () => [] as string[],
+      );
+      return json({ buildPlannerFolder: dir, builds: dir ? await listBuildFiles(dir) : [], guidesFolder: guides, guides: guideFolders });
+    }),
+);
+
+server.registerTool(
+  "remove_builds",
+  {
+    title: "Remove old Build Planner files and guides",
+    description:
+      "Move superseded .build files (only ones this tool made) and guide folders out of the way, into " +
+      "Documents/PoE2 Build Planner/removed/<date>. Nothing is deleted, so the player can move them back. Ask the player " +
+      "first and name exactly what will be moved. File and folder names come from list_builds.",
+    inputSchema: {
+      builds: z.array(z.string()).optional().describe("File names, e.g. \"WFO-levling.build\""),
+      guides: z.array(z.string()).optional().describe("Guide folder names"),
+    },
+    annotations: { destructiveHint: true },
+  },
+  async ({ builds = [], guides = [] }) =>
+    run(async () => {
+      const archive = join(dirname(guidesDir()), "removed", new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-"));
+      const notes: string[] = [];
+      let movedBuilds: string[] = [];
+      const dir = findBuildPlannerDir();
+      if (builds.length && dir) {
+        const ours = new Set((await listBuildFiles(dir)).filter((b) => b.madeByThisTool).map((b) => b.file));
+        const allowed = builds.filter((b) => ours.has(b));
+        for (const b of builds.filter((b) => !ours.has(b))) notes.push(`Skipped ${b}: not found, or not made by this tool.`);
+        movedBuilds = (await archiveEntries(dir, allowed, archive)).moved;
+      }
+      const movedGuides = guides.length ? (await archiveEntries(guidesDir(), guides, archive)).moved : [];
+      for (const g of guides.filter((g) => !movedGuides.includes(g))) notes.push(`Skipped guide ${g}: not found.`);
+      return json({
+        moved: { builds: movedBuilds, guides: movedGuides },
+        to: movedBuilds.length || movedGuides.length ? archive : undefined,
+        notes,
+        restartGame: movedBuilds.length ? "Restart Path of Exile 2 for the Build Planner list to update." : undefined,
       });
     }),
 );

@@ -78,3 +78,22 @@ describe("setup gaps", () => {
     expect(setupGaps({ skills, spirit: 100, spiritUnreserved: 10, buttons: "few" })).toEqual([]);
   });
 });
+
+describe("not modelled", async () => {
+  const { existsSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { defaultCacheDir } = await import("../src/data/cache.js");
+  const { ALL_SOURCES } = await import("../src/data/sources.js");
+  const hasCache = Object.values(ALL_SOURCES).every((s) => existsSync(join(defaultCacheDir(), s.file)));
+  it.skipIf(!hasCache)("flags infusions, projectiles through walls, and supports that don't change DPS", async () => {
+    const { loadGameData } = await import("../src/data/gamedata.js");
+    const { notModelled } = await import("../src/engine/caveats.js");
+    const { findGem } = await import("../src/skills/skills.js");
+    const data = await loadGameData();
+    const g = (n: string) => findGem(data, n);
+    const notes = notModelled(data, [{ gem: g("Firestorm"), supports: [g("Overabundance II")] }, { gem: g("Flame Wall") }], []);
+    expect(notes.some((n) => /Firestorm: Elemental Infusions/.test(n))).toBe(true);
+    expect(notes.some((n) => /Overabundance II on Firestorm/.test(n))).toBe(true);
+    expect(notes.some((n) => /Flame Wall: damage it adds to projectiles/.test(n))).toBe(true);
+  });
+});

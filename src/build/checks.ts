@@ -188,6 +188,16 @@ export function checkBuild(data: GameData, nodes: ReadonlyMap<string, TreeNode>,
   const skillIssues = validateSkills(data, input.skills, allocatedNodes);
   for (const issue of skillIssues) warnings.push(issue.message);
 
+  // Gated passives (e.g. Oracle-only ones) need their unlocking node, usually an ascendancy notable.
+  const taken = new Set([...input.passives, ...(input.ascendancyPassives ?? [])]);
+  for (const key of input.passives) {
+    const by = ((nodes.get(key)?.unlockConstraint as { nodes?: number[] } | undefined)?.nodes ?? []).map(String);
+    if (by.length && !by.some((k) => taken.has(k))) {
+      const names = by.map((k) => nodes.get(k)?.name ?? k).join(" or ");
+      warnings.push(`${nodes.get(key)?.name ?? key} can only be taken after ${names}; add it to the ascendancy passives, or leave this passive out until that trial.`);
+    }
+  }
+
   // Attributes: class base + passives + gear; spend "+5 any" nodes where they're most needed.
   const fromClass: Attributes = { str: input.cls.baseStr, dex: input.cls.baseDex, int: input.cls.baseInt };
   const fromPassives = zero();

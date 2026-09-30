@@ -18,6 +18,7 @@ import {
   type AssumedItem,
   type GearTier,
 } from "./gear.js";
+import { ASSUMPTIONS, notModelled } from "./caveats.js";
 import { applyItemExtras, type EngineItem, type ItemExtras } from "./itemExtras.js";
 import type { PobEngine } from "./pob.js";
 import { verdict, type Content, type Verdict } from "./verdict.js";
@@ -122,6 +123,9 @@ export interface Evaluation {
   goalCheck?: GoalCheck;
   /** Gaps in the skill setup: unused Spirit, no boss skill, no curse/mark/warcry/banner. */
   setupGaps: string[];
+  /** Mechanics in this build the numbers leave out or assume; mention them when they matter. */
+  notModelled: string[];
+  assumptions: string[];
   resources: { mana?: number; manaUnreserved?: number; spirit?: number; spiritUnreserved?: number };
   attributes: {
     str?: number;
@@ -413,6 +417,12 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
     verdicts,
     goalCheck: input.goals ? goalCheck(numbers, level, input.goals) : undefined,
     setupGaps: gaps,
+    notModelled: notModelled(
+      data,
+      [...input.skills, ...(input.extras?.weaponSwap?.skills ?? [])],
+      input.tree ? passives.flatMap((k) => input.tree!.nodes.get(k) ?? []) : [],
+    ),
+    assumptions: ASSUMPTIONS,
     resources: { mana: round(s.Mana), manaUnreserved: round(s.ManaUnreserved), spirit, spiritUnreserved },
     attributes: { str: s.Str, dex: s.Dex, int: s.Int, required: { str: s.ReqStr, dex: s.ReqDex, int: s.ReqInt }, flexibleNodes: flexible },
     passives: { allocated: clearRun.allocatedPassives, addedToConnect, unreachable },

@@ -2,7 +2,7 @@
 // Spec: https://www.pathofexile.com/developer/docs/game — "Build Planner".
 
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { GameData } from "../data/gamedata.js";
@@ -269,4 +269,53 @@ export async function writeBuildFile(build: BuildFile, dir: string, overwrite = 
   }
   await writeFile(path, JSON.stringify(build, null, 2));
   return path;
+}
+
+export interface BuildFileInfo {
+  /** File name, e.g. "WFO - Leveling.build". */
+  file: string;
+  /** The build's name inside the file. */
+  name?: string;
+  madeByThisTool: boolean;
+  modified: string;
+}
+
+/** The .build files in the BuildPlanner folder, newest first. */
+export async function listBuildFiles(dir: string): Promise<BuildFileInfo[]> {
+  if (!existsSync(dir)) return [];
+  const files = (await readdir(dir)).filter((f) => f.toLowerCase().endsWith(".build"));
+  const infos = await Promise.all(
+    files.map(async (file) => {
+      const path = join(dir, file);
+      let name: string | undefined;
+      let ours = false;
+      try {
+        const build = JSON.parse(await readFile(path, "utf8")) as BuildFile;
+        name = build.name;
+        ours = build.author === AUTHOR;
+      } catch {
+        // not readable as a build file
+      }
+      return { file, name, madeByThisTool: ours, modified: (await stat(path)).mtime.toISOString() };
+    }),
+  );
+  return infos.sort((a, b) => b.modified.localeCompare(a.modified));
+}
+
+/**
+ * Move files or folders out of the way into `archiveDir` (not deleted, so they can be restored).
+ * Only entries directly inside `dir` whose names are given; returns what was moved.
+ */
+export async function archiveEntries(dir: string, entries: string[], archiveDir: string): Promise<{ moved: string[]; to: string }> {
+  await mkdir(archiveDir, { recursive: true });
+  const moved: string[] = [];
+  for (const entry of entries) {
+    const from = join(dir, entry);
+    if (entry.includes("/") || entry.includes("\\") || entry.startsWith(".") || !existsSync(from)) continue;
+    let target = join(archiveDir, entry);
+    for (let n = 2; existsSync(target); n++) target = join(archiveDir, `${n} ${entry}`);
+    await rename(from, target);
+    moved.push(entry);
+  }
+  return { moved, to: archiveDir };
 }

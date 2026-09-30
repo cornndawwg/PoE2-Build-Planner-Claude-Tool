@@ -19,6 +19,21 @@ export interface AllocatedNode {
   forTarget: string;
 }
 
+export interface PlanOptions {
+  /** "cheapest" (default): nearest remaining target first. "priority": targets in the order given. */
+  order?: "cheapest" | "priority";
+  /**
+   * Tie-breaker between equally short routes: a score per node (positive = prefer, negative =
+   * avoid), e.g. small passives matching the build's terms. Never makes a route longer.
+   */
+  weight?: (key: string) => number;
+  /**
+   * Nodes allocated outside the main tree (ascendancy passives) that unlock gated passives, e.g.
+   * The Unseen Path for the Oracle-only nodes. When given, gated passives are only used if unlocked.
+   */
+  unlocked?: Iterable<string>;
+}
+
 export interface PathPlan {
   /** Nodes in the order to take them (start node excluded). */
   nodes: AllocatedNode[];
@@ -69,6 +84,11 @@ export class PassiveTree {
     return !required || required === ascendancyId;
   }
 
+  /** Nodes that must be allocated (any one of them) before this one can be, e.g. an ascendancy notable. */
+  unlockedBy(key: string): string[] {
+    return (this.nodes.get(key)?.unlockConstraint as { nodes?: number[] } | undefined)?.nodes?.map(String) ?? [];
+  }
+
   /** Multiple-choice options are picked at the end of a path, never walked through. */
   private canPassThrough(key: string, ascendancyId?: string): boolean {
     return this.isMainTreeNode(key, ascendancyId) && !this.nodes.get(key)?.isMultipleChoiceOption;
@@ -103,6 +123,44 @@ export class PassiveTree {
     return seen;
   }
 
+  /**
+  * Cheapest routes from the allocated nodes: each node costs one point, nudged by a tiny
+  * tie-breaking weight so that among equally short routes the preferred one wins.
+  */
+  private weightedSearchFrom(
+    allocated: ReadonlySet<string>,
+    passable: (key: string) => boolean,
+    endpoint: (key: string) => boolean,
+    weight: (key: string) => number,
+  ): Map<string, { dist: number; points: number; prev: string | undefined }> {
+    const best = new Map<string, { dist: number; points: number; prev: string | undefined }>();
+    const heap = new MinHeap<string>();
+    for (const key of allocated) {
+      best.set(key, { dist: 0, points: 0, prev: undefined });
+      heap.push(0, key);
+    }
+    const done = new Set<string>();
+    for (let item = heap.pop(); item; item = heap.pop()) {
+      const [dist, key] = item;
+      if (done.has(key)) continue;
+      done.add(key);
+      if (!allocated.has(key) && !passable(key)) continue;
+      const here = best.get(key)!;
+      for (const next of this.neighbors(key)) {
+        if (done.has(next) || !(passable(next) || endpoint(next))) continue;
+        // |nudge| stays far below one point even over a 100-node route.
+        const nudge = Math.max(-5, Math.min(5, weight(next))) * 0.001;
+        const cost = dist + 1 - nudge;
+        const seen = best.get(next);
+        if (!seen || cost < seen.dist) {
+          best.set(next, { dist: cost, points: here.points + 1, prev: key });
+          heap.push(cost, next);
+        }
+      }
+    }
+    return best;
+  }
+
   /** Points needed to reach each main-tree node from the class start. */
   distancesFrom(startKey: string, ascendancyId?: string): Map<string, number> {
     const found = this.searchFrom(
@@ -117,21 +175,31 @@ export class PassiveTree {
    * Connect the start to every target, always taking the cheapest remaining target next
    * (a greedy Steiner-tree approximation). The order doubles as a leveling order.
    */
-  planMainTree(startKey: string, targets: string[], ascendancyId?: string): PathPlan {
+  planMainTree(startKey: string, targets: string[], ascendancyId?: string, options: PlanOptions = {}): PathPlan {
+    const unlocked = options.unlocked ? new Set(options.unlocked) : undefined;
+    // Gated passives count only once something that unlocks them is allocated (checked per search).
+    let allocatedNow: ReadonlySet<string> = new Set();
+    const open = (k: string) => {
+      if (!unlocked) return true;
+      const by = this.unlockedBy(k);
+      return by.length === 0 || by.some((u) => unlocked.has(u) || allocatedNow.has(u));
+    };
     return this.plan(
       new Set([startKey]),
       targets,
-      (k) => this.canPassThrough(k, ascendancyId),
-      (k) => this.isMainTreeNode(k, ascendancyId),
+      (k) => this.canPassThrough(k, ascendancyId) && open(k),
+      (k) => this.isMainTreeNode(k, ascendancyId) && open(k),
+      options,
+      (allocated) => (allocatedNow = allocated),
     );
   }
 
   /** Path from the ascendancy's start node to the chosen ascendancy nodes. */
-  planAscendancy(ascendancyId: string, targets: string[]): PathPlan {
+  planAscendancy(ascendancyId: string, targets: string[], options: PlanOptions = {}): PathPlan {
     const start = [...this.nodes].find(([, n]) => n.isAscendancyStart && n.ascendancyId === ascendancyId)?.[0];
     if (!start) return { nodes: [], unreachable: targets };
     const inAscendancy = (k: string) => this.nodes.get(k)?.ascendancyId === ascendancyId;
-    return this.plan(new Set([start]), targets, inAscendancy, inAscendancy);
+    return this.plan(new Set([start]), targets, inAscendancy, inAscendancy, options);
   }
 
   private plan(
@@ -139,19 +207,35 @@ export class PassiveTree {
     targets: string[],
     passable: (key: string) => boolean,
     endpoint: (key: string) => boolean,
+    options: PlanOptions = {},
+    onAllocated?: (allocated: ReadonlySet<string>) => void,
   ): PathPlan {
     const allocated = new Set(start);
     const remaining = new Set(targets.filter((t) => !allocated.has(t)));
     const order: AllocatedNode[] = [];
     const unreachable: string[] = [];
+    const weight = options.weight ?? (() => 0);
 
     while (remaining.size > 0) {
-      const found = this.searchFrom(allocated, passable, endpoint);
+      onAllocated?.(allocated);
+      const found = this.weightedSearchFrom(allocated, passable, endpoint, weight);
       let best: string | undefined;
-      for (const target of remaining) {
-        const hit = found.get(target);
-        if (!hit) continue;
-        if (best === undefined || hit.dist < found.get(best)!.dist) best = target;
+      if (options.order === "priority") {
+        // The first remaining target in the given order that can be reached.
+        for (const target of remaining) {
+          if (found.has(target)) {
+            best = target;
+            break;
+          }
+          unreachable.push(target);
+          remaining.delete(target);
+        }
+      } else {
+        for (const target of remaining) {
+          const hit = found.get(target);
+          if (!hit) continue;
+          if (best === undefined || hit.dist < found.get(best)!.dist) best = target;
+        }
       }
       if (best === undefined) {
         unreachable.push(...remaining);
@@ -238,4 +322,37 @@ export function treeForClass(
   const tree = changed ? new PassiveTree(nodes) : base;
   cache.set(cacheKey, tree);
   return tree;
+}
+
+/** A small binary min-heap for the route search. */
+class MinHeap<T> {
+  private items: [number, T][] = [];
+  push(priority: number, value: T) {
+    const items = this.items;
+    items.push([priority, value]);
+    for (let i = items.length - 1; i > 0; ) {
+      const parent = (i - 1) >> 1;
+      if (items[parent]![0] <= items[i]![0]) break;
+      [items[parent], items[i]] = [items[i]!, items[parent]!];
+      i = parent;
+    }
+  }
+  pop(): [number, T] | undefined {
+    const items = this.items;
+    const top = items[0];
+    const last = items.pop();
+    if (!top || !last || items.length === 0) return top;
+    items[0] = last;
+    for (let i = 0; ; ) {
+      const l = 2 * i + 1;
+      const r = l + 1;
+      let m = i;
+      if (l < items.length && items[l]![0] < items[m]![0]) m = l;
+      if (r < items.length && items[r]![0] < items[m]![0]) m = r;
+      if (m === i) break;
+      [items[m], items[i]] = [items[i]!, items[m]!];
+      i = m;
+    }
+    return top;
+  }
 }
