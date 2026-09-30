@@ -7,7 +7,7 @@
 | Piece | Where |
 | :- | :- |
 | LuaJIT 2.1 (`2460b3ff`, the commit PoB itself pins) + `lua-utf8` (`d65ebfa4`) | Built from source by `.github/workflows/pob-engine.yml` on `windows-latest` (MSYS2 UCRT64) |
-| Path of Building PoE2 (`ce566eac`, 0.5.5 data), without art (~51 MB) | Sparse checkout in the same workflow |
+| Path of Building PoE2 (`2450f2fc`, 0.5.5 data, 2026-09-29), without art (~51 MB) | Sparse checkout in the same workflow |
 | `pob/host.lua` | Starts PoB headless and answers JSON-line requests (`evaluate`, `ping`) |
 | `src/engine/pob.ts` | Finds the engine, runs it as a child process, restarts it if it crashes or hangs |
 | `src/engine/gear.ts` | Assumed budget gear per level and defence style |
@@ -38,7 +38,7 @@ Check out Path of Building without art (Git Bash: `MSYS_NO_PATHCONV=1` stops pat
 MSYS_NO_PATHCONV=1 git clone --filter=blob:none --no-checkout https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2 vendor/pob
 git -C vendor/pob config core.autocrlf false
 MSYS_NO_PATHCONV=1 git -C vendor/pob sparse-checkout set --no-cone '/src/' '/runtime/lua/' '/LICENSE.md' '!*.zst' '!*.png' '!*.jpg' '!*.dds' '!*.webp' '!/src/Export/'
-git -C vendor/pob checkout ce566eac45ea8a86477f513c7ee65a1ebe60014e
+git -C vendor/pob checkout 2450f2fc6ff5d35ace9b35bcd9d31e648ae9d7f1
 ```
 
 Quick check: `cd vendor/pob/src && ../../runtime/luajit.exe ../../../pob/host.lua selftest`

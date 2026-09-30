@@ -2,7 +2,15 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { defaultCacheDir } from "./cache.js";
 import { parseLuaData } from "./lua.js";
-import { parseSkillAmuletBases, parseSocketables, parseTradeStats, type SkillAmuletBase, type Socketable } from "./pobextra.js";
+import {
+  parseNodeVariants,
+  parseSkillAmuletBases,
+  parseSocketables,
+  parseTradeStats,
+  type NodeVariant,
+  type SkillAmuletBase,
+  type Socketable,
+} from "./pobextra.js";
 import { parseUniqueFile, type UniqueItem } from "./uniques.js";
 import { SOURCES, UNIQUE_SOURCES } from "./sources.js";
 import type { BaseItem, Mod, Skill, SkillGem, TreeExport, TreeNode } from "./types.js";
@@ -75,6 +83,8 @@ export interface GameData {
   tradeStats: Map<string, string>;
   /** Quests that grant Spirit (e.g. "+30 to Spirit"), with the area level they're done at. */
   questSpirit: { areaLevel: number; spirit: number; quest: string }[];
+  /** Class- and ascendancy-specific versions of passives, by node key (see PassiveTree.forClass). */
+  nodeVariants: Map<string, Record<string, NodeVariant>>;
 }
 
 interface PobQuestReward {
@@ -189,6 +199,10 @@ export async function loadGameData(cacheDir: string = defaultCacheDir()): Promis
     readFile(join(cacheDir, SOURCES.pobAmuletBases.file), "utf8"),
   ]);
   const quests = parseLuaData(questSrc) as unknown as PobQuestReward[];
+  // Optional: caches from before the PoB tree was added don't have it yet.
+  const nodeVariants = await readFile(join(cacheDir, SOURCES.pobTree.file), "utf8")
+    .then((src) => parseNodeVariants(parseLuaData(src)))
+    .catch(() => new Map<string, Record<string, NodeVariant>>());
   const classOfBase = new Map(Object.values(baseItems).map((b) => [b.name, b.item_class]));
   const isBase = (name: string) => classOfBase.has(name);
   const uniqueFiles = await Promise.all(
@@ -205,6 +219,7 @@ export async function loadGameData(cacheDir: string = defaultCacheDir()): Promis
   return {
     nodes: new Map(Object.entries(tree.nodes)),
     classes: playableClasses(tree),
+    nodeVariants,
     gems: releasedGems,
     playerGems: buildPlayerGems(pobGems, releasedGems, skills),
     skills,

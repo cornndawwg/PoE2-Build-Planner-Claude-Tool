@@ -98,3 +98,34 @@ export function parseTradeStats(value: LuaValue): Map<string, string> {
   }
   return result;
 }
+
+/** A class- or ascendancy-specific version of a passive (e.g. Druid's "Guardian of the Wilds"). */
+export interface NodeVariant {
+  name: string;
+  stats: string[];
+}
+
+/**
+ * Class-specific node variants from Path of Building's tree (GGG's export only has the default):
+ * node key → { "Druid": variant, "Abyssal Lich": variant, … }. Numeric option keys are the
+ * "+5 to any Attribute" choices, handled elsewhere, and are skipped.
+ */
+export function parseNodeVariants(value: LuaValue): Map<string, Record<string, NodeVariant>> {
+  const result = new Map<string, Record<string, NodeVariant>>();
+  const nodes = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, LuaValue>).nodes : undefined;
+  if (!nodes || typeof nodes !== "object" || Array.isArray(nodes)) return result;
+  for (const [key, node] of Object.entries(nodes)) {
+    const options = node && typeof node === "object" && !Array.isArray(node) ? (node as Record<string, LuaValue>).options : undefined;
+    if (!options || typeof options !== "object" || Array.isArray(options)) continue;
+    const variants: Record<string, NodeVariant> = {};
+    for (const [owner, option] of Object.entries(options)) {
+      if (/^\d+$/.test(owner) || !option || typeof option !== "object" || Array.isArray(option)) continue;
+      const o = option as Record<string, LuaValue>;
+      if (typeof o.name !== "string") continue;
+      const stats = o.stats && typeof o.stats === "object" ? Object.values(o.stats).filter((s): s is string => typeof s === "string") : [];
+      variants[owner] = { name: o.name, stats };
+    }
+    if (Object.keys(variants).length) result.set(key, variants);
+  }
+  return result;
+}

@@ -2,10 +2,11 @@ import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseLuaData } from "./lua.js";
-import { ALL_SOURCES, SOURCE_KEYS } from "./sources.js";
+import { ALL_SOURCES, DEFAULT_TREE_VERSION, latestTreeVersion, pobTreeUrl, SOURCE_KEYS, type DataSource } from "./sources.js";
 
 const USER_AGENT = "poe2-build-planner-claude-tool/0.0.1";
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+/** Re-check daily: unchanged files cost one conditional request (304), so staying current is cheap. */
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface ManifestEntry {
   url: string;
@@ -22,7 +23,7 @@ export type FetchLike = (url: string, init?: { headers?: Record<string, string> 
 
 export interface EnsureOptions {
   cacheDir?: string;
-  /** Re-check a cached file with the server once it is older than this. Default: one week. */
+  /** Re-check a cached file with the server once it is older than this. Default: one day. */
   maxAgeMs?: number;
   /** Always re-check with the server (a cheap conditional request). */
   force?: boolean;
@@ -73,8 +74,8 @@ async function ensureOne(
   dir: string,
   manifest: Manifest,
   opts: Required<Pick<EnsureOptions, "maxAgeMs" | "force" | "fetchImpl" | "now" | "log">>,
+  source: DataSource = ALL_SOURCES[key]!,
 ): Promise<EnsureResult> {
-  const source = ALL_SOURCES[key]!;
   const path = join(dir, source.file);
   const entry = manifest[key];
   const cached = entry !== undefined && entry.url === source.url && (await fileExists(path));
@@ -139,7 +140,7 @@ async function ensureOne(
 export async function ensureData(options: EnsureOptions = {}): Promise<EnsureResult[]> {
   const dir = options.cacheDir ?? defaultCacheDir();
   const opts = {
-    maxAgeMs: options.maxAgeMs ?? WEEK_MS,
+    maxAgeMs: options.maxAgeMs ?? DAY_MS,
     force: options.force ?? false,
     fetchImpl: options.fetchImpl ?? ((url, init) => fetch(url, init)),
     now: options.now ?? (() => new Date()),
@@ -148,7 +149,15 @@ export async function ensureData(options: EnsureOptions = {}): Promise<EnsureRes
 
   await mkdir(dir, { recursive: true });
   const manifest = await readManifest(dir);
-  const results = await Promise.all(SOURCE_KEYS.map((key) => ensureOne(key, dir, manifest, opts)));
+  const results = await Promise.all(SOURCE_KEYS.filter((k) => k !== "pobTree").map((key) => ensureOne(key, dir, manifest, opts)));
+  // PoB's tree lives in a folder per game version; follow its latest one.
+  let version = DEFAULT_TREE_VERSION;
+  try {
+    version = latestTreeVersion(await readFile(join(dir, ALL_SOURCES.pobGameVersions!.file), "utf8")) ?? version;
+  } catch {
+    // keep the default
+  }
+  results.push(await ensureOne("pobTree", dir, manifest, opts, { ...ALL_SOURCES.pobTree!, url: pobTreeUrl(version) }));
   await writeManifest(dir, manifest);
   return results;
 }

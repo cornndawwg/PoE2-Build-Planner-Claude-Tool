@@ -4,7 +4,7 @@ The Claude Desktop Extension bundles the following software. Each is used under 
 
 | Component | Version | Copyright |
 | :- | :- | :- |
-| [Path of Building Community (PoE2)](https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2) — calculation engine and data, without art | commit ce566eac | Copyright (c) 2016 David Gowor |
+| [Path of Building Community (PoE2)](https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2) — calculation engine and data, without art | commit 2450f2fc | Copyright (c) 2016 David Gowor |
 | [LuaJIT](https://luajit.org/) | commit 2460b3ff | Copyright (C) 2005-2026 Mike Pall |
 | [lua-utf8](https://github.com/starwing/luautf8) | commit d65ebfa4 | Copyright (c) 2018 Xavier Wang |
 

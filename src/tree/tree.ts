@@ -206,3 +206,36 @@ export function levelForPoint(n: number, quests: readonly { areaLevel: number; p
   for (let level = 1; level <= 100; level++) if (pointsAtLevel(level, quests) >= n) return level;
   return undefined;
 }
+
+const classTrees = new WeakMap<PassiveTree, Map<string, PassiveTree>>();
+
+/**
+ * The tree as a class (and ascendancy) sees it: some passives near the shared starting areas are
+ * different for Druid, Witch, Huntress or an ascendancy (e.g. Druid's "Guardian of the Wilds" in
+ * place of "Relentless Vindicator"). An ascendancy's version wins over the class's.
+ */
+export function treeForClass(
+  base: PassiveTree,
+  variants: ReadonlyMap<string, Record<string, { name: string; stats: string[] }>>,
+  className?: string,
+  ascendancyName?: string,
+): PassiveTree {
+  if (!variants.size || (!className && !ascendancyName)) return base;
+  const cacheKey = `${className ?? ""}|${ascendancyName ?? ""}`;
+  const cache = classTrees.get(base) ?? new Map<string, PassiveTree>();
+  classTrees.set(base, cache);
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+  let changed = false;
+  const nodes = new Map(base.nodes);
+  for (const [key, options] of variants) {
+    const variant = (ascendancyName && options[ascendancyName]) || (className && options[className]);
+    const node = nodes.get(key);
+    if (!variant || !node) continue;
+    nodes.set(key, { ...node, name: variant.name, stats: variant.stats });
+    changed = true;
+  }
+  const tree = changed ? new PassiveTree(nodes) : base;
+  cache.set(cacheKey, tree);
+  return tree;
+}

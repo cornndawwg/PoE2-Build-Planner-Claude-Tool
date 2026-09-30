@@ -83,7 +83,7 @@ function tokenize(src: string): Token[] {
 }
 
 export function parseLuaData(src: string): LuaValue {
-  const tokens = tokenize(src);
+  const tokens = tokenize(src.replace(/^\uFEFF/, "")); // some PoB files start with a byte-order mark
   let pos = 0;
   const peek = () => tokens[pos];
   const next = () => {

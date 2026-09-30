@@ -8,7 +8,21 @@ const REPOE = "https://repoe-fork.github.io/poe2/";
  * for calculations once that is pinned; "dev" tracks the latest game data until then.
  */
 export const POB_REF = "dev";
-const POB = `https://raw.githubusercontent.com/PathOfBuildingCommunity/PathOfBuilding-PoE2/${POB_REF}/src/Data/`;
+const POB_SRC = `https://raw.githubusercontent.com/PathOfBuildingCommunity/PathOfBuilding-PoE2/${POB_REF}/src/`;
+const POB = `${POB_SRC}Data/`;
+
+/** Path of Building's tree for a version ("0_5"): it has the class-specific node variants GGG's export lacks. */
+export function pobTreeUrl(version: string): string {
+  return `${POB_SRC}TreeData/${version}/tree.lua`;
+}
+/** Used until PoB's GameVersions.lua says otherwise. */
+export const DEFAULT_TREE_VERSION = "0_5";
+
+/** The latest tree version from PoB's GameVersions.lua (treeVersionList's last entry). */
+export function latestTreeVersion(gameVersionsLua: string): string | undefined {
+  const list = /treeVersionList\s*=\s*\{([^}]*)\}/.exec(gameVersionsLua)?.[1];
+  return list ? [...list.matchAll(/"(\d+_\d+)"/g)].map((m) => m[1]!).pop() : undefined;
+}
 
 export interface DataSource {
   url: string;
@@ -73,6 +87,18 @@ export const SOURCES = {
     file: "pob_bases_amulet.lua",
     format: "text",
     description: "Path of Building amulet bases (granted skills)",
+  },
+  pobGameVersions: {
+    url: `${POB_SRC}GameVersions.lua`,
+    file: "pob_game_versions.lua",
+    format: "text",
+    description: "Path of Building game and tree versions",
+  },
+  pobTree: {
+    url: pobTreeUrl(DEFAULT_TREE_VERSION),
+    file: "pob_tree.lua",
+    format: "lua",
+    description: "Path of Building passive tree (class-specific node variants)",
   },
   pobQuestRewards: {
     url: `${POB}QuestRewards.lua`,

@@ -20,7 +20,7 @@ env:
   LUAJIT_COMMIT: 2460b3ff93a1c955de3d62cfc825de7d68dc272e
   LUAUTF8_COMMIT: d65ebfa4a00d6e582970ab729013bb2a629e74c9
   # Path of Building PoE2 dev with 0.5.5 game data.
-  POB_COMMIT: ce566eac45ea8a86477f513c7ee65a1ebe60014e
+  POB_COMMIT: 2450f2fc6ff5d35ace9b35bcd9d31e648ae9d7f1
 
 jobs:
   windows:

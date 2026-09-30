@@ -38,9 +38,9 @@ import { compatibleSupports, findGem, searchSkills } from "./skills/skills.js";
 import { stripMarkup } from "./text.js";
 import { completePassives } from "./tree/complete.js";
 import { findScaling } from "./tree/scaling.js";
-import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, withLevels } from "./tree/tree.js";
+import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, treeForClass, withLevels } from "./tree/tree.js";
 
-const VERSION = "0.5.0";
+const VERSION = "0.5.1";
 const log = (message: string) => process.stderr.write(`[poe2-build-planner] ${message}\n`);
 
 const INSTRUCTIONS = `Tools for planning Path of Exile 2 builds (game version 0.5) for casual players.
@@ -310,8 +310,9 @@ server.registerTool(
   },
   async ({ terms = [], class: className, ascendancy, listAscendancy, includeJewelSockets, limit }) =>
     run(async () => {
-    const { data, tree } = await gameData();
+    const { data, tree: baseTree } = await gameData();
     const found = className ? findClass(data, className, ascendancy) : undefined;
+    const tree = treeForClass(baseTree, data.nodeVariants, found?.cls.name, found?.asc?.name);
     if (listAscendancy) {
       if (!found?.asc) throw new Error("listAscendancy needs the ascendancy (e.g. class \"Titan\").");
       const nodes = [...tree.nodes].filter(([, n]) => n.ascendancyId === found.asc!.id && !n.isAscendancyStart);
@@ -355,8 +356,9 @@ server.registerTool(
   },
   async ({ class: className, ascendancy, passives, ascendancyPassives, targetLevel }) =>
     run(async () => {
-    const { data, tree } = await gameData();
+    const { data, tree: baseTree } = await gameData();
     const { cls, asc } = findClass(data, className, ascendancy);
+    const tree = treeForClass(baseTree, data.nodeVariants, cls.name, asc?.name);
     const level = targetLevel ?? 90;
     const plan = tree.planMainTree(cls.startNode, passives.map((p) => resolveNode(tree, p)), asc?.id);
     const budget = pointsAtLevel(level, data.questPoints);
@@ -462,8 +464,9 @@ const buildSpec = {
 };
 type BuildSpec = z.infer<z.ZodObject<typeof buildSpec>>;
 
-function toEvaluateInput(data: GameData, tree: PassiveTree, spec: BuildSpec) {
+function toEvaluateInput(data: GameData, baseTree: PassiveTree, spec: BuildSpec) {
   const { cls, asc } = findClass(data, spec.class, spec.ascendancy);
+  const tree = treeForClass(baseTree, data.nodeVariants, cls.name, asc?.name);
   const skills = spec.skills.map((s) => ({ gem: findGem(data, s.gemId), supports: s.supports?.map((id) => findGem(data, id)) }));
   const terms = spec.terms?.length
     ? spec.terms
@@ -613,7 +616,7 @@ server.registerTool(
       const purpose = args.goals?.purpose;
       const objective: Objective = args.objective ?? (purpose === "mapping" ? "clear" : purpose === "bossing" ? "boss" : "balanced");
       const gear = input.gear.kind === "budget" ? input.gear : undefined;
-      const result = await optimizeBuild(engine, data, tree, input, {
+      const result = await optimizeBuild(engine, data, input.tree!, input, {
         objective,
         terms: gear?.terms ?? input.skills[input.mainSkill ?? 0]!.gem.tags,
         avoid: gear?.avoid,
@@ -901,11 +904,12 @@ server.registerTool(
   },
   async (args) =>
     run(async () => {
-      const { data, tree } = await gameData();
+      const { data, tree: baseTree } = await gameData();
       const { cls, asc } = findClass(data, args.class, args.ascendancy);
+      const tree = treeForClass(baseTree, data.nodeVariants, cls.name, asc?.name);
       const given = [...args.passives, ...(args.ascendancyPassives ?? [])].map((p) => resolveNode(tree, p));
       const completed = completePassives(tree, cls.startNode, given, asc?.id);
-      const result = checkBuild(data, data.nodes, {
+      const result = checkBuild(data, tree.nodes, {
         cls,
         characterLevel: args.characterLevel,
         passives: completed.main,
@@ -989,8 +993,9 @@ server.registerTool(
   },
   async (args) =>
     run(async () => {
-      const { data, tree } = await gameData();
+      const { data, tree: baseTree } = await gameData();
       const { cls, asc } = findClass(data, args.class, args.ascendancy);
+      const tree = treeForClass(baseTree, data.nodeVariants, cls.name, asc?.name);
       const result = await createGuide(
         data,
         tree,
@@ -1080,8 +1085,9 @@ server.registerTool(
   },
   async (args) =>
     run(async () => {
-      const { data, tree } = await gameData();
-      const { asc } = findClass(data, args.class, args.ascendancy);
+      const { data, tree: baseTree } = await gameData();
+      const { cls, asc } = findClass(data, args.class, args.ascendancy);
+      const tree = treeForClass(baseTree, data.nodeVariants, cls.name, asc?.name);
       const toPassive = (p: z.infer<typeof passiveEntry>) => ({
         id: tree.describe(resolveNode(tree, p.id)).id,
         level: p.level,
