@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "poe2-build-planner",
   "display_name": "PoE2 Build Planner",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Turn a Path of Exile 2 play fantasy into a playable build: skills, supports, passive tree, leveling path, gear and jewel stats, and an in-game Build Planner file.",
   "long_description": "Built for casual players. Tell Claude what you want to play and it uses these tools to pick a class and ascendancy, skills and compatible supports, plan the passive tree with the level to take each point, list the gear and jewel stats to look for, suggest fitting uniques, and write the plan into the game's Build Planner. Runs locally; on first start it downloads public game data (GGG's passive tree export, RePoE and Path of Building data, about 30 MB). This product isn't affiliated with or endorsed by Grinding Gear Games in any way.",
   "author": {
@@ -90,6 +90,30 @@
     {
       "name": "export_build",
       "description": "Write the build into the in-game Build Planner"
+    },
+    {
+      "name": "import_character",
+      "description": "Import a character from a Path of Building code: real numbers and a defence audit"
+    },
+    {
+      "name": "character_upgrades",
+      "description": "Best gear upgrades for an imported character, each calculated, with trade searches"
+    },
+    {
+      "name": "list_characters",
+      "description": "Characters imported earlier"
+    },
+    {
+      "name": "open_dashboard",
+      "description": "Open a live dashboard of what Claude is testing and thinking, with buttons to steer it"
+    },
+    {
+      "name": "dashboard_post",
+      "description": "Post a thought, plan, question or decision to the dashboard"
+    },
+    {
+      "name": "dashboard_feedback",
+      "description": "Read the player's answers, choices and messages from the dashboard"
     },
     {
       "name": "list_builds",

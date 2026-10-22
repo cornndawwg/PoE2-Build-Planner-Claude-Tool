@@ -101,10 +101,115 @@ local function equip(raw, slot)
   return nil
 end
 
+--- Apply calculation settings on top of whatever the build has (see evaluate's config).
+local function applyConfig(config)
+  config = config or {}
+  local input = build.configTab.input
+  for key, value in pairs(config) do
+    if key ~= "questsUpToLevel" then input[key] = value end
+  end
+  -- PoB assumes every campaign quest reward by default; for a leveling checkpoint, only count
+  -- rewards from quests at or below that level.
+  if config.questsUpToLevel then
+    for _, quest in ipairs(data.questRewards) do
+      if quest.useConfig ~= false and quest.Stat then
+        input["quest" .. quest.Description .. quest.Area .. quest.Info] = quest.AreaLevel <= config.questsUpToLevel
+      end
+    end
+  end
+  if config.enemyIsBoss ~= nil then
+    local resist = BOSS_RESIST[config.enemyIsBoss] or 0
+    input.enemyFireResist = config.enemyFireResist or resist
+    input.enemyColdResist = config.enemyColdResist or resist
+    input.enemyLightningResist = config.enemyLightningResist or resist
+    input.enemyChaosResist = config.enemyChaosResist or 0
+  end
+  build.configTab:BuildModList()
+  return input
+end
+
+--- What the loaded character is: passives, skill groups and equipped items.
+local function describeCharacter()
+  local passives = {}
+  for id, node in pairs(build.spec.allocNodes) do
+    passives[#passives + 1] = { id = id, name = node.dn or node.name, ascendancy = node.ascendancyName }
+  end
+  local skills = {}
+  for i, group in ipairs(build.skillsTab.socketGroupList) do
+    local gems = {}
+    for _, gem in ipairs(group.gemList or {}) do
+      local effect = gem.gemData and gem.gemData.grantedEffect
+      gems[#gems + 1] = {
+        name = gem.nameSpec, level = gem.level, quality = gem.quality, enabled = gem.enabled ~= false,
+        support = effect and effect.support or false,
+      }
+    end
+    skills[#skills + 1] = { index = i, label = group.displayLabel, enabled = group.enabled ~= false, slot = group.slot, gems = gems }
+  end
+  local items = {}
+  for slotName, slot in pairs(build.itemsTab.slots) do
+    local item = slot.selItemId and slot.selItemId ~= 0 and build.itemsTab.items[slot.selItemId]
+    if item then
+      items[#items + 1] = { slot = slotName, name = item.name, rarity = item.rarity, raw = item:BuildRaw() }
+    end
+  end
+  table.sort(items, function(a, b) return a.slot < b.slot end)
+  return { passives = passives, skills = skills, mainSkill = build.mainSocketGroup, items = items }
+end
+
 local methods = {}
 
 function methods.ping()
   return { pong = true }
+end
+
+--- Load a Path of Building build (the XML inside a PoB code), optionally change it, and calculate.
+-- params: xml; config (same as evaluate, applied on top of the build's own settings);
+-- edits: list of { slot, addLines = {...} } (add mods to the item there), { slot, remove = true }
+-- (empty the slot) or { slot, raw } (equip this item); mainSkill (1-based socket group);
+-- describe (also return passives, skills and items).
+function methods.loadXml(p)
+  if type(p.xml) ~= "string" or not p.xml:find("<PathOfBuilding") then error("not a Path of Building build") end
+  loadBuildFromXML(p.xml, "import")
+  local notes = {}
+  local input = applyConfig(p.config)
+  for _, edit in ipairs(p.edits or {}) do
+    local control = build.itemsTab.slots[edit.slot or ""]
+    if not control then
+      notes[#notes + 1] = "unknown slot " .. tostring(edit.slot)
+    else
+      local current = control.selItemId and control.selItemId ~= 0 and build.itemsTab.items[control.selItemId]
+      if edit.remove then
+        control:SetSelItemId(0)
+      elseif edit.raw then
+        local err = equip(edit.raw, edit.slot)
+        if err then notes[#notes + 1] = err end
+      elseif edit.addLines then
+        if current then
+          local err = equip(current:BuildRaw() .. "\n" .. table.concat(edit.addLines, "\n"), edit.slot)
+          if err then notes[#notes + 1] = err end
+        else
+          notes[#notes + 1] = "nothing equipped in " .. edit.slot
+        end
+      end
+    end
+  end
+  build.itemsTab:PopulateSlots()
+  if p.mainSkill then
+    build.mainSocketGroup = math.max(1, math.min(tonumber(p.mainSkill), #build.skillsTab.socketGroupList))
+  end
+  recalc()
+  local enemyLevel = math.max(1, math.min(tonumber(input.enemyLevel) or build.characterLevel, #data.monsterLifeTable))
+  return {
+    stats = collectStats(),
+    enemyBaseLife = data.monsterLifeTable[enemyLevel],
+    enemyLevel = enemyLevel,
+    className = build.spec.curClassName,
+    ascendancy = build.spec.curAscendClassName,
+    level = build.characterLevel,
+    character = p.describe and describeCharacter() or nil,
+    notes = notes,
+  }
 end
 
 --- Build a character from scratch and calculate it.
@@ -130,28 +235,7 @@ function methods.evaluate(p)
   build.characterLevelAutoMode = false
   build.characterLevel = tonumber(p.level) or 90
 
-  local config = p.config or {}
-  local input = build.configTab.input
-  for key, value in pairs(config) do
-    if key ~= "questsUpToLevel" then input[key] = value end
-  end
-  -- PoB assumes every campaign quest reward by default; for a leveling checkpoint, only count
-  -- rewards from quests at or below that level.
-  if config.questsUpToLevel then
-    for _, quest in ipairs(data.questRewards) do
-      if quest.useConfig ~= false and quest.Stat then
-        input["quest" .. quest.Description .. quest.Area .. quest.Info] = quest.AreaLevel <= config.questsUpToLevel
-      end
-    end
-  end
-  if config.enemyIsBoss ~= nil then
-    local resist = BOSS_RESIST[config.enemyIsBoss] or 0
-    input.enemyFireResist = config.enemyFireResist or resist
-    input.enemyColdResist = config.enemyColdResist or resist
-    input.enemyLightningResist = config.enemyLightningResist or resist
-    input.enemyChaosResist = config.enemyChaosResist or 0
-  end
-  build.configTab:BuildModList()
+  local input = applyConfig(p.config)
 
   for _, item in ipairs(p.items or {}) do
     local raw = item.raw
@@ -205,6 +289,8 @@ function methods.evaluate(p)
     allocatedPassives = allocated,
     skills = skills,
     notes = notes,
+    -- The whole build as Path of Building XML (compressed into a PoB code by the caller).
+    xml = p.exportXml and build:SaveDB("code") or nil,
   }
 end
 

@@ -54,6 +54,9 @@ The first start downloads about 30 MB of game data to `%APPDATA%\poe2-build-find
 | Tool | What it does |
 | :- | :- |
 | `build_intake` | The questions Claude asks first: what the build is for (campaign, mapping, bossing), how far to push (up to pinnacle bosses), one button or several, budget, Hardcore |
+| `open_dashboard` / `dashboard_post` / `dashboard_feedback` | A live dashboard in your browser showing what Claude is testing and thinking; answer its questions, keep or drop variants and send messages |
+| `import_character` | Your real character from a Path of Building code: numbers, verdicts and a defence audit ("why am I dying") |
+| `character_upgrades` | The best mods for each gear slot, calculated on your character, with trade searches |
 | `list_classes` | Classes and released ascendancies |
 | `search_skills` | Skills by tags/types/weapon, with where each comes from |
 | `gem_details` | Everything about one gem: tags, skill types, description, level 1/20 text, Spirit cost, recommended supports |
@@ -62,7 +65,7 @@ The first start downloads about 30 MB of game data to `%APPDATA%\poe2-build-find
 | `plan_passive_tree` | Path to the chosen passives in priority order, with the level to take each point; prefers small passives matching the build on equal routes, and knows ascendancy-gated passives (e.g. Oracle-only) and when their trial comes |
 | `leveling_phases` | League-start phases (acts, interludes, maps) with levels, checkpoints and quest rewards |
 | `check_build` | Checks a plan at a character level: skill availability, attribute and Spirit needs, passive budget |
-| `evaluate_build` | Path of Building numbers (damage, kill times, hits survived, resists) and a viability verdict at a level, checked honestly against the player's goal (on track / rough / not realistic yet, with options), with setup gaps (unused Spirit, no boss skill), budget/mid/high gear, anoints, instills, runes, free-Spirit amulet skills, flasks and weapon swap (Windows) |
+| `evaluate_build` | Path of Building numbers (and a Path of Building code to open or share the build) (damage, kill times, hits survived, resists) and a viability verdict at a level, checked honestly against the player's goal (on track / rough / not realistic yet, with options), with setup gaps (unused Spirit, no boss skill), budget/mid/high gear, anoints, instills, runes, free-Spirit amulet skills, flasks and weapon swap (Windows) |
 | `optimize_build` | Tries support swaps, notables, Spirit skills and anoints in Path of Building and keeps what adds damage without losing survivability |
 | `compare_builds` | Two to four variants calculated the same way, side by side, with which is best for clearing, bossing and survival |
 | `suggest_extras` | Spirit skills that fit and cost (and which a Lament/Portent/Absent Amulet grants free), jewels, flasks and charms (unique ones too), amulet anoints and helmet instills (Raven-Touched Shard), runes, soul cores and idols per slot, with costs |

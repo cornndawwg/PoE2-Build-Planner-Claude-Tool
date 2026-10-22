@@ -54,9 +54,11 @@ export interface EvaluateInput {
   extras?: ItemExtras;
   /** What the player wants from the build: stricter targets, an honest goal check. */
   goals?: Goals;
+  /** Also return the build as Path of Building XML (for a PoB code). */
+  exportXml?: boolean;
 }
 
-interface PobResult {
+export interface PobResult {
   stats: Record<string, number>;
   enemyBaseLife: number;
   enemyLevel: number;
@@ -65,6 +67,8 @@ interface PobResult {
   allocatedPassives: number;
   skills: { label?: string; gems: { name: string; level: number; found: boolean }[] }[];
   notes: string[];
+  /** Path of Building XML of the build, when asked for (exportXml). */
+  xml?: string;
 }
 
 /** Campaign resistance penalty by character level, using Path of Building's per-act values. */
@@ -142,6 +146,38 @@ export interface Evaluation {
   assumedGear: { slot: string; base: string; mods: string[] }[];
   itemsUsed: string[];
   notes: string[];
+  /** The build as Path of Building XML (only with exportXml). */
+  pobXml?: string;
+}
+
+/** Damage and kill times for one calculation against one kind of enemy. */
+export function scenarioOf(run: Pick<PobResult, "stats" | "enemyBaseLife">, enemy: Scenario["enemy"]): Scenario {
+  const s = run.stats;
+  const own = s.CombinedDPS ?? s.TotalDPS ?? 0;
+  const minions = s.MinionCombinedDPS;
+  const dps = minions && minions > own ? minions : own;
+  const ignite = s.IgniteDPS || undefined;
+  const poison = s.PoisonDPS || undefined;
+  const bleed = s.BleedDPS || undefined;
+  const otherDot = s.TotalDot || undefined;
+  const kill = (mult: number) => (dps > 0 ? Math.round(((run.enemyBaseLife * mult) / dps) * 10) / 10 : undefined);
+  return {
+    enemy,
+    dps: Math.round(dps),
+    breakdown: {
+      hits: round(s.TotalDPS),
+      ignite: round(ignite),
+      poison: round(poison),
+      bleed: round(bleed),
+      otherDamageOverTime: round(otherDot),
+      minions: round(minions),
+    },
+    averageHit: round(s.AverageHit),
+    secondsToKill:
+      enemy === "normal monsters"
+        ? { normal: kill(RARITY_LIFE.normal), rare: kill(RARITY_LIFE.rare) }
+        : { boss: kill(RARITY_LIFE.boss) },
+  };
 }
 
 /** Rough life multipliers by monster rarity (not in the game data; a labelled heuristic). */
@@ -269,6 +305,7 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
     mainSkill: mainIndex + 1,
     items,
     config: { enemyIsBoss, enemyLevel: areaLevel, resistancePenalty: resistancePenalty(level), questsUpToLevel: level, ...extrasResult.config },
+    exportXml: input.exportXml && enemyIsBoss === "None",
   });
 
   // Spend "+5 to any Attribute" passives where Path of Building says attributes are short
@@ -316,34 +353,6 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
   const bossTier = level >= 65 ? "Pinnacle" : "Boss";
   const bossRun = await engine.request<PobResult>("evaluate", params(bossTier, attributes), timeoutMs);
 
-  const scenario = (run: PobResult, enemy: Scenario["enemy"]): Scenario => {
-    const s = run.stats;
-    const own = s.CombinedDPS ?? s.TotalDPS ?? 0;
-    const minions = s.MinionCombinedDPS;
-    const dps = minions && minions > own ? minions : own;
-    const ignite = s.IgniteDPS || undefined;
-    const poison = s.PoisonDPS || undefined;
-    const bleed = s.BleedDPS || undefined;
-    const otherDot = s.TotalDot || undefined;
-    const kill = (mult: number) => (dps > 0 ? Math.round(((run.enemyBaseLife * mult) / dps) * 10) / 10 : undefined);
-    return {
-      enemy,
-      dps: Math.round(dps),
-      breakdown: {
-        hits: round(s.TotalDPS),
-        ignite: round(ignite),
-        poison: round(poison),
-        bleed: round(bleed),
-        otherDamageOverTime: round(otherDot),
-        minions: round(minions),
-      },
-      averageHit: round(s.AverageHit),
-      secondsToKill:
-        enemy === "normal monsters"
-          ? { normal: kill(RARITY_LIFE.normal), rare: kill(RARITY_LIFE.rare) }
-          : { boss: kill(RARITY_LIFE.boss) },
-    };
-  };
 
   const s = clearRun.stats;
   notes.push(...new Set([...clearRun.notes, ...bossRun.notes]));
@@ -360,8 +369,8 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
     }
   }
 
-  const clear = scenario(clearRun, "normal monsters");
-  const boss = scenario(bossRun, bossTier === "Pinnacle" ? "a pinnacle boss" : "a boss");
+  const clear = scenarioOf(clearRun, "normal monsters");
+  const boss = scenarioOf(bossRun, bossTier === "Pinnacle" ? "a pinnacle boss" : "a boss");
   const hitsFromNormal = s.TotalNumberOfHits === undefined ? undefined : Math.round(s.TotalNumberOfHits * 10) / 10;
   const hitsFromBoss = bossRun.stats.TotalNumberOfHits === undefined ? undefined : Math.round(bossRun.stats.TotalNumberOfHits * 10) / 10;
   const missingResistance = { fire: s.MissingFireResist, cold: s.MissingColdResist, lightning: s.MissingLightningResist };
@@ -435,6 +444,7 @@ export async function evaluateBuild(engine: PobEngine, data: GameData, input: Ev
       return [{ slot: slot.startsWith("Jewel ") ? "Jewel socket" : slot, base, mods: [...mods, ...topUp] }];
     }),
     itemsUsed,
+    pobXml: clearRun.xml,
     notes,
   };
 }

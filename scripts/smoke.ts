@@ -14,7 +14,7 @@ const transport = new StdioClientTransport({
   // SMOKE_SERVER=<path to server.js> tests a compiled build (dist/ or an unpacked .mcpb).
   args: process.env.SMOKE_SERVER ? [process.env.SMOKE_SERVER] : ["--import", "tsx", "src/server.ts"],
   stderr: "inherit",
-  env: { ...(process.env as Record<string, string>), POE2BF_BUILDPLANNER_DIR: exportDir, POE2BF_GUIDES_DIR: exportDir, POE2BF_NO_OPEN: "1" },
+  env: { ...(process.env as Record<string, string>), POE2BF_BUILDPLANNER_DIR: exportDir, POE2BF_GUIDES_DIR: exportDir, POE2BF_NO_OPEN: "1", POE2BF_CHARACTERS_DIR: exportDir },
 });
 const client = new Client({ name: "smoke-test", version: "0.0.1" });
 await client.connect(transport);
@@ -103,6 +103,24 @@ if (!smalls.length || !smalls.every((n: { kind: string }) => n.kind === "small")
 const gatedCheck = JSON.parse(await call("check_build", { class: "Oracle", characterLevel: 30, passives: ["Night's Bite"], skills: [{ gemId: "Spark" }] }));
 if (!gatedCheck.warnings?.some((w: string) => /needs The Unseen Path first/.test(w))) process.exitCode = 1;
 await call("list_builds");
+
+// Real-character flow: a build as a PoB code, imported back, then upgrade advice; and the dashboard.
+const withCode = JSON.parse(
+  await call("evaluate_build", { class: "Infernalist", level: 80, passives: [], skills: [{ gemId: "Fireball" }], terms: ["fire", "spell"], pobCode: true, label: "Smoke Fireball" }),
+);
+if (withCode.available) {
+  if (!/^[A-Za-z0-9_-]{100,}/.test(withCode.pobCode ?? "")) process.exitCode = 1;
+  const imported = JSON.parse(await call("import_character", { pobCode: withCode.pobCode, goals: { purpose: "mapping", push: "T15" } }));
+  if (!imported.characterId || Math.abs(imported.numbers.clear.dps - withCode.clear.dps) > withCode.clear.dps * 0.02) process.exitCode = 1;
+  const upgrades = JSON.parse(await call("character_upgrades", { characterId: imported.characterId, slots: ["Weapon 1", "Amulet"], maxTests: 15 }));
+  if (!upgrades.topUpgrades?.length) process.exitCode = 1;
+  await call("list_characters");
+}
+const dash = JSON.parse(await call("open_dashboard", { title: "Smoke session", open: false }));
+if (!/^http:\/\/127\.0\.0\.1:\d+\/\?k=/.test(dash.url ?? "")) process.exitCode = 1;
+await call("dashboard_post", { kind: "question", title: "Fire or lightning?", options: ["Fire", "Lightning"] });
+const feedback = JSON.parse(await call("dashboard_feedback"));
+if (!Array.isArray(feedback.actions)) process.exitCode = 1;
 await call("build_intake");
 const goalEval = JSON.parse(
   await call("evaluate_build", {

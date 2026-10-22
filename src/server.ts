@@ -33,7 +33,12 @@ import { optimizeBuild, type Objective } from "./engine/optimize.js";
 import { compareBuilds } from "./engine/compare.js";
 import { evaluateBuild, type EvaluateInput } from "./engine/evaluate.js";
 import { findEngine, PobEngine } from "./engine/pob.js";
-import { createGuide, guidesDir } from "./guide/guide.js";
+import { createGuide, guidesDir, openInBrowser } from "./guide/guide.js";
+import { Dashboard } from "./dashboard/dashboard.js";
+import { adviseUpgrades, loadCharacter } from "./engine/character.js";
+import { characterXml, listCharacters, saveCharacter } from "./engine/characterStore.js";
+import { decodePobCode, encodePobCode } from "./engine/pobcode.js";
+import type { Evaluation } from "./engine/evaluate.js";
 import type { Skill } from "./data/types.js";
 import { availableFromLevel } from "./skills/levels.js";
 import { compatibleSupports, findGem, searchSkills } from "./skills/skills.js";
@@ -43,7 +48,7 @@ import { findScaling, termPattern } from "./tree/scaling.js";
 import { ASCENDANCY_TRIALS, trialForAscendancyPoint, TRIALS_NOTE } from "./build/trials.js";
 import { ASCENDANCY_POINTS, PassiveTree, pointsAtLevel, treeForClass, withLevels } from "./tree/tree.js";
 
-const VERSION = "0.6.0";
+const VERSION = "0.7.0";
 const log = (message: string) => process.stderr.write(`[poe2-build-planner] ${message}\n`);
 
 const INSTRUCTIONS = `Tools for planning Path of Exile 2 builds (game version 0.5) for casual players.
@@ -55,6 +60,12 @@ How to help the player:
 - Tools return candidates, not decisions: read the stat text and pick what actually fits. Keystones are build-defining and often have big drawbacks; check the "drawbacks" field.
 - Defences are a baseline every build needs; keep that advice short and focus on what makes their idea work.
 - Verdicts and numbers are estimates, not guarantees.
+
+Live dashboard: at the start of a build or character session, call open_dashboard (and tell the player it opened in their browser). Every calculation you run appears there by itself. As you work, post short dashboard_post notes: a plan before a batch of tests, a thought when a result changes your mind, a decision with the reason, and a question (with answer buttons) when there's a real choice for the player. Give each tested variant a clear label. When a tool result says the player sent something, call dashboard_feedback and act on it before continuing: follow their answers, drop what they rejected, and reply in the chat. If they don't answer a question, carry on with your best judgement and say so.
+
+Existing characters: ask for their Path of Building code (in Path of Building: Import/Export Build → Generate; they can import their character into PoB from their account first). import_character gives the real numbers and a defenceAudit; lead with the audit for "why am I dying". character_upgrades calculates the best mods per gear slot with trade searches; use it for "what should I upgrade". Plan changes from their real gear, not assumed gear.
+
+Path of Building codes: evaluate_build with pobCode: true returns a code the player can open in Path of Building to check or share the build. Offer it with a finished build.
 
 Before planning anything, call build_intake and ask its questions in one short message: fantasy, league start or existing character, what the build is for (campaign, fast mapping, bossing, balanced), how far they realistically want to push (campaign … pinnacle bosses), one-button or several, budget, softcore/hardcore, dislikes. Skip what they already told you. Pass the answers as "goals" to evaluate_build, optimize_build and compare_builds. For an existing character, plan from their level and gear.
 
@@ -127,7 +138,49 @@ async function prices(data: GameData, league?: string): Promise<{ table?: PriceT
   }
 }
 
-const json = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
+/** The live dashboard (started by open_dashboard; events are kept even before it's opened). */
+const dashboard = new Dashboard();
+
+/**
+ * A tool result. When the player has answered or commented on the dashboard, every result carries
+ * a note so Claude picks it up before its next step.
+ */
+const json = (value: unknown) => {
+  const content = [{ type: "text" as const, text: JSON.stringify(value) }];
+  if (dashboard.waiting > 0) {
+    content.push({
+      type: "text" as const,
+      text: `The player sent ${dashboard.waiting} message(s) or choice(s) from the dashboard. Call dashboard_feedback and take them into account before continuing.`,
+    });
+  }
+  return { content };
+};
+
+/** Put a calculated build on the dashboard. */
+function publishEvaluation(label: string, e: Evaluation) {
+  const v = e.verdicts.at(-1);
+  dashboard.publish({
+    kind: "test",
+    title: label,
+    data: {
+      clearDps: e.clear.dps,
+      rareSeconds: e.clear.secondsToKill.rare,
+      bossDps: e.boss.dps,
+      bossSeconds: e.boss.secondsToKill.boss,
+      ehp: e.defence.effectiveHp,
+      life: e.defence.life,
+      es: e.defence.energyShield,
+      hitsFromBoss: e.survival.hitsFromBoss,
+      verdict: v && { overall: v.overall, content: v.content, weakPoint: v.weakPoint },
+      goal: e.goalCheck && { status: e.goalCheck.status, message: e.goalCheck.message },
+      gaps: e.setupGaps,
+    },
+  });
+}
+
+/** A short dashboard label for a build spec. */
+const specLabel = (spec: { label?: string; class: string; ascendancy?: string; level: number; skills: { gemId: string }[]; mainSkill?: number }) =>
+  spec.label ?? `${spec.ascendancy ?? spec.class} ${spec.skills[spec.mainSkill ?? 0]?.gemId ?? ""} (level ${spec.level})`;
 const fail = (message: string) => ({ content: [{ type: "text" as const, text: message }], isError: true });
 
 /** Run a tool body, reporting errors to Claude as readable messages rather than protocol errors. */
@@ -523,6 +576,7 @@ const buildSpec = {
   ascendancyPassives: z.array(z.string()).optional(),
   skills: z.array(z.object({ gemId: z.string().describe("gemId or exact name"), supports: z.array(z.string()).optional() })).min(1),
   mainSkill: z.number().int().min(0).optional().describe("0-based index of the main damage skill (default 0)"),
+  label: z.string().max(80).optional().describe("Short name for this variant on the dashboard, e.g. \"Firestorm + Wildsurge\""),
   goals: goalsSchema.optional(),
   terms: z.array(z.string()).optional().describe("What the build scales, for the assumed gear (as for stat_priorities)"),
   avoid: z.array(z.string()).optional(),
@@ -660,7 +714,10 @@ server.registerTool(
       "charms (`flasks`, with `flasksActive`), and a `weaponSwap` set with its own weapons, passives and skills. " +
       "Timeless jewels (Heroic Tragedy, Undying Hate) aren't calculated by Path of Building for PoE2 yet. To compare options side by side, use " +
       "compare_builds. Numbers are estimates: assumed gear and heuristic bands, not guarantees. Windows only for now.",
-    inputSchema: buildSpec,
+    inputSchema: {
+      ...buildSpec,
+      pobCode: z.boolean().optional().describe("Also return a Path of Building code for this build (to open, check or share in PoB)"),
+    },
     annotations: { readOnlyHint: true },
   },
   async (args) =>
@@ -669,8 +726,18 @@ server.registerTool(
       const engine = getEngine();
       if (!engine) return engineUnavailable();
       const { input, skillIssues } = toEvaluateInput(data, tree, args);
-      const evaluation = await evaluateBuild(engine, data, input);
-      return json({ available: true, skillIssues, ...evaluation });
+      const evaluation = await evaluateBuild(engine, data, { ...input, exportXml: args.pobCode });
+      publishEvaluation(specLabel(args), evaluation);
+      const { pobXml, ...rest } = evaluation;
+      return json({
+        available: true,
+        skillIssues,
+        ...rest,
+        pobCode: pobXml ? encodePobCode(pobXml) : undefined,
+        pobCodeNote: pobXml
+          ? "In Path of Building (PoE2): Import/Export Build → paste the code → Import. It uses the assumed gear shown in assumedGear."
+          : undefined,
+      });
     }),
 );
 
@@ -737,6 +804,7 @@ server.registerTool(
         kinds: args.kinds,
         maxEvaluations: args.maxEvaluations ?? 40,
       });
+      dashboard.publish({ kind: "optimize", title: `Optimizer (${objective}): ${specLabel(args)}`, data: result });
       return json({ available: true, skillIssues, ...result });
     }),
 );
@@ -752,7 +820,7 @@ server.registerTool(
       "Returns damage, kill times, survival, life/ES, resistances, attribute shortfalls and verdicts per variant, the change " +
       "against the first variant, and which is best for clearing, bossing and survival. Windows only for now.",
     inputSchema: {
-      variants: z.array(z.object({ label: z.string(), ...buildSpec })).min(2).max(4),
+      variants: z.array(z.object({ ...buildSpec, label: z.string() })).min(2).max(4),
     },
     annotations: { readOnlyHint: true },
   },
@@ -763,6 +831,7 @@ server.registerTool(
       if (!engine) return engineUnavailable();
       const prepared = variants.map((v) => ({ label: v.label, ...toEvaluateInput(data, tree, v) }));
       const comparison = await compareBuilds(engine, data, prepared.map(({ label, input }) => ({ label, input })));
+      dashboard.publish({ kind: "compare", title: `Compared: ${variants.map((v) => v.label).join(" vs ")}`, data: comparison });
       return json({
         available: true,
         ...comparison,
@@ -1263,6 +1332,174 @@ server.registerTool(
 );
 
 server.registerTool(
+  "import_character",
+  {
+    title: "Import a character from a Path of Building code",
+    description:
+      "Load the player's real character from a Path of Building (PoE2) code: in Path of Building, Import/Export Build → " +
+      "Generate, then copy the code (or import their character into PoB first, then generate). Returns what the character is " +
+      "(class, level, skills, key passives, every item with its mods), its numbers on the same basis as evaluate_build " +
+      "(damage, kill times, effective HP, biggest hit of each damage type, resistances, verdicts and, with goals, an honest " +
+      "goalCheck), and a defenceAudit of where it's fragile (uncapped or negative resistances, the damage type most likely to " +
+      "kill it, one-shot risk, unused Spirit). It's saved under a characterId for character_upgrades. Use it for \"why am I " +
+      "dying\", \"what should I upgrade\" or to plan from their real gear. Windows only for now.",
+    inputSchema: {
+      pobCode: z.string().min(20).describe("The Path of Building code (a long string of letters, numbers, - and _)"),
+      label: z.string().optional().describe("A name for this character, e.g. \"Firestorm Oracle\""),
+      goals: goalsSchema.optional(),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) =>
+    run(async () => {
+      const { data } = await gameData();
+      const engine = getEngine();
+      if (!engine) return engineUnavailable();
+      const xml = decodePobCode(args.pobCode);
+      const report = await loadCharacter(engine, data, xml, args.goals);
+      const saved = await saveCharacter(xml, args.label ?? `${report.ascendancy ?? report.className} level ${report.level}${report.mainSkill ? ` (${report.mainSkill})` : ""}`);
+      dashboard.publish({ kind: "character", title: `Imported ${saved.label}`, data: { audit: report.defenceAudit, numbers: report.numbers } });
+      return json({ available: true, characterId: saved.id, label: saved.label, ...report });
+    }),
+);
+
+server.registerTool(
+  "character_upgrades",
+  {
+    title: "Best upgrades for an imported character",
+    description:
+      "For an imported character (characterId from import_character): what each gear slot's mods are worth now (compared " +
+      "with a plain item of the same base), and which mods would help most on each slot — every mod is calculated on this " +
+      "character in Path of Building (a good roll at its level), counting damage, effective HP and the weakest max hit. " +
+      "Missing resistances (and chaos resistance when chaos is the weak spot) are always tested. Returns topUpgrades across " +
+      "slots and a trade search per slot with the best mods. Terms, defence and objective default from the character's main " +
+      "skill and gear, or from goals. Takes 5-20 seconds.",
+    inputSchema: {
+      characterId: z.string(),
+      goals: goalsSchema.optional(),
+      objective: z.enum(["clear", "boss", "balanced"]).optional(),
+      terms: z.array(z.string()).optional().describe("What the build scales, e.g. [\"fire\", \"spell\"] (default: the main skill's tags)"),
+      avoid: z.array(z.string()).optional(),
+      defence: z.array(z.enum(DEFENCE_STYLES)).optional(),
+      slots: z.array(z.string()).optional().describe("Only these slots, e.g. [\"Helmet\", \"Ring 1\"]"),
+      league: z.string().optional(),
+      maxTests: z.number().int().min(10).max(150).optional(),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async (args) =>
+    run(async () => {
+      const { data } = await gameData();
+      const engine = getEngine();
+      if (!engine) return engineUnavailable();
+      const xml = await characterXml(args.characterId);
+      const report = await loadCharacter(engine, data, xml, args.goals);
+      let terms = args.terms;
+      if (!terms?.length) {
+        try {
+          terms = findGem(data, report.mainSkill ?? "").tags.filter((t) => !["intelligence", "strength", "dexterity", "repeatable"].includes(t));
+        } catch {
+          terms = [];
+        }
+      }
+      if (!terms.length) throw new Error("Couldn't tell what the build scales; pass terms, e.g. [\"fire\", \"spell\"].");
+      const d = report.numbers.defence;
+      const defence = args.defence?.length ? args.defence : (d.energyShield ?? 0) > (d.life ?? 0) ? (["energy shield"] as DefenceStyle[]) : (["life"] as DefenceStyle[]);
+      const purpose = args.goals?.purpose;
+      const objective = args.objective ?? (purpose === "mapping" ? "clear" : purpose === "bossing" ? "boss" : "balanced");
+      const league = args.league ?? (await prices(data)).table?.league ?? "Standard";
+      dashboard.publish({ kind: "status", title: `Testing upgrades for ${report.ascendancy ?? report.className}`, text: `Objective: ${objective}. Terms: ${terms.join(", ")}.` });
+      const advice = await adviseUpgrades(engine, data, xml, report, { terms, avoid: args.avoid, defence, objective, slots: args.slots, league, maxTests: args.maxTests });
+      dashboard.publish({ kind: "upgrades", title: "Upgrade results", data: { topUpgrades: advice.topUpgrades, baseline: advice.baseline } });
+      return json({ available: true, characterId: args.characterId, objective, terms, defence, defenceAudit: report.defenceAudit, ...advice });
+    }),
+);
+
+server.registerTool(
+  "list_characters",
+  {
+    title: "List imported characters",
+    description: "Characters imported earlier (characterId, label, when), newest first.",
+    annotations: { readOnlyHint: true },
+  },
+  async () => run(async () => json(await listCharacters())),
+);
+
+server.registerTool(
+  "open_dashboard",
+  {
+    title: "Open the live build dashboard",
+    description:
+      "Open a live dashboard in the player's browser (served from their own PC) that shows what you're testing and thinking " +
+      "as it happens: every evaluate_build, compare_builds, optimize_build, import and upgrade check appears automatically " +
+      "with its numbers and a \"best so far\" board, and your dashboard_post notes (thoughts, plans, questions) appear beside " +
+      "them. The player can answer questions with buttons, mark tests keep/drop, comment and send messages; you see those " +
+      "via dashboard_feedback (every tool result says when something is waiting). Open it at the start of a build or " +
+      "character session, and tell the player it's there. Calling it again reopens the same dashboard.",
+    inputSchema: {
+      title: z.string().max(80).optional().describe("Session title, e.g. \"Firestorm Oracle\""),
+      open: z.boolean().optional().describe("Open it in the browser (default true)"),
+    },
+  },
+  async ({ title, open }) =>
+    run(async () => {
+      const url = await dashboard.start(title);
+      const opened = open === false ? false : await openInBrowser(url);
+      return json({
+        url,
+        opened,
+        note: opened
+          ? "The dashboard is open in the player's browser. Post your reasoning with dashboard_post as you go, and check dashboard_feedback when told something is waiting."
+          : "Give the player this link to open in their browser (it only works on this PC).",
+      });
+    }),
+);
+
+server.registerTool(
+  "dashboard_post",
+  {
+    title: "Post to the dashboard",
+    description:
+      "Show the player what you're thinking on the live dashboard: a thought (what you noticed and why it matters), a plan " +
+      "(what you'll test next), a question (with answer options as buttons — use it for real choices, e.g. which of two " +
+      "directions to explore), a decision (what you settled on and why), or a status update. Keep each post short and plain. " +
+      "Test results appear on their own; don't repeat their numbers, interpret them.",
+    inputSchema: {
+      kind: z.enum(["thought", "plan", "question", "decision", "status"]),
+      title: z.string().min(1).max(120),
+      text: z.string().max(1500).optional(),
+      options: z.array(z.string().max(80)).max(6).optional().describe("Answer buttons for a question"),
+    },
+  },
+  async ({ kind, title, text, options }) =>
+    run(async () => {
+      const event = dashboard.publish({ kind, title, text, options: kind === "question" ? options : undefined });
+      return json({
+        posted: event.id,
+        dashboardOpen: dashboard.running,
+        note: dashboard.running ? undefined : "The dashboard isn't open; the post is kept and shows when it's opened (open_dashboard).",
+      });
+    }),
+);
+
+server.registerTool(
+  "dashboard_feedback",
+  {
+    title: "Read the player's dashboard input",
+    description:
+      "What the player did on the dashboard since you last checked: answers to your questions, tests or plans they marked " +
+      "keep or drop, comments, and messages. Act on them: follow their answers, drop what they rejected, and acknowledge " +
+      "their messages in the chat. Returns an empty list when there's nothing new.",
+    annotations: { readOnlyHint: true },
+  },
+  async () =>
+    run(async () => {
+      const actions = dashboard.takeActions();
+      return json({ actions, dashboardOpen: dashboard.running });
+    }),
+);
+
+server.registerTool(
   "list_builds",
   {
     title: "List Build Planner files and guides",
@@ -1323,6 +1560,7 @@ server.registerTool(
 // Don't leave Path of Building running after Claude closes the extension.
 const shutdown = () => {
   if (engine) engine.stop();
+  dashboard.stop();
 };
 process.on("exit", shutdown);
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => process.exit(0));
